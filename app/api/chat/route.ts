@@ -43,6 +43,89 @@ function extractText(response: GroqResponse): string {
   return "Sorry, I could not generate a response.";
 }
 
+function cleanProductName(name: string) {
+  return name
+    .replace(/\*\*/g, "")
+    .replace(/#226;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&rsquo;/g, "'")
+    .replace(/&lsquo;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractProductsFromReply(reply: string) {
+  const lines = reply.split("\n");
+  const products = [];
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+
+    const match = line.match(
+      /^\s*(?:\d+[\).\s-]+)?(.+?)\s*[-–:]\s*(?:Rs\.?|LKR)\s*([\d,]+)/i
+    );
+
+    if (!match) continue;
+
+    const name = cleanProductName(match[1]);
+    const price = Number(match[2].replace(/,/g, ""));
+
+    if (!name || Number.isNaN(price)) continue;
+
+    const nextLine = lines[index + 1]?.trim() || "";
+    const reasonMatch = nextLine.match(/^Reason\s*:\s*(.+)$/i);
+
+    products.push({
+      id: `${index}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      name,
+      price,
+      currency: "LKR" as const,
+      imageUrl: null,
+      productUrl: null,
+      inStock: null,
+      reason: reasonMatch?.[1] || "Matched with your budget and occasion.",
+    });
+  }
+
+  const unique = new Map();
+
+  for (const product of products) {
+    const key = product.name.toLowerCase();
+
+    if (!unique.has(key)) {
+      unique.set(key, product);
+    }
+  }
+
+  return Array.from(unique.values()).slice(0, 6);
+}
+
+function cleanReplyForUi(reply: string, productCount: number) {
+  const lines = reply.split("\n");
+
+  const cleanedLines = lines.filter((line) => {
+    const trimmed = line.trim();
+
+    const isProductLine =
+      /^\d+[\).\s-]+.+?\s*[-–:]\s*(?:Rs\.?|LKR)\s*[\d,]+/i.test(trimmed);
+
+    const isReasonLine = /^Reason\s*:/i.test(trimmed);
+
+    return !isProductLine && !isReasonLine;
+  });
+
+  const cleaned = cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+
+  if (productCount > 0) {
+    return cleaned || `I found ${productCount} good options for you.`;
+  }
+
+  return cleaned || reply;
+}
+
 function extractToolDebug(response: GroqResponse) {
   return (response.output || [])
     .filter(
@@ -63,10 +146,16 @@ You are Kapruka AI Concierge, a premium Sri Lankan AI shopping assistant.
 
 You help users shop from Kapruka using real Kapruka MCP tools.
 
-Personality:
-- Warm, confident, Sri Lankan, helpful.
-- Keep answers short and visual-friendly.
-- Act like a smart personal shopper, not a generic chatbot.
+Personality and voice:
+- You are not a generic chatbot. You are a stylish Sri Lankan gift concierge.
+- Sound warm, confident, helpful, and slightly witty.
+- Give honest opinions. Do not list products neutrally only.
+- Use short, human sentences.
+- Make the user feel guided, not lectured.
+- Avoid cheesy lines like "gifts from the heart are precious" or "choose what resonates".
+- Avoid corporate phrases like "memorable birthday celebration", "delightful experience", "perfect choice", unless truly natural.
+- Do not end with generic inspirational advice.
+- End with a useful next action, like asking which item to add to cart, whether to check delivery, or whether they want a more premium/budget option.
 
 Language matching rules:
 - Detect the user's language style.
@@ -106,6 +195,9 @@ Search quality rules:
 - Clean messy HTML entities from product names before replying.
 - Give a short reason why each product matches the recipient and occasion.
 - If the search results are weak, do another better search with improved keywords.
+- When listing products, use this exact format so the UI can create product cards:
+  1. Product Name - Rs. 2990
+     Reason: short reason here
 
 Critical MCP tool argument rules:
 - Use native JSON types only.
@@ -147,6 +239,25 @@ Wrong example:
 
 ${isRetry ? "The previous tool call failed because argument types were wrong. Retry carefully using native JSON types only." : ""}
 `;
+}
+function removeRoboticLines(reply: string) {
+  const bannedPatterns = [
+    /gifts that come from the heart/i,
+    /always the most precious/i,
+    /resonates with/i,
+    /truly memorable birthday celebration/i,
+    /delightful experience/i,
+    /perfect choice for your loved one/i,
+  ];
+
+  return reply
+    .split("\n")
+    .filter((line) => {
+      return !bannedPatterns.some((pattern) => pattern.test(line));
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 async function callGroq(message: string, isRetry: boolean) {
@@ -212,10 +323,7 @@ export async function POST(req: Request) {
     let groqResponse = await callGroq(message, false);
     let data = (await groqResponse.json()) as GroqResponse;
 
-    if (
-      !groqResponse.ok &&
-      data.error?.code === "tool_use_failed"
-    ) {
+    if (!groqResponse.ok && data.error?.code === "tool_use_failed") {
       console.warn("Retrying Groq MCP call with stricter JSON typing...");
       groqResponse = await callGroq(message, true);
       data = (await groqResponse.json()) as GroqResponse;
@@ -233,11 +341,16 @@ export async function POST(req: Request) {
         { status: groqResponse.status }
       );
     }
+    
+const reply = removeRoboticLines(extractText(data));
+const products = extractProductsFromReply(reply);
+const displayReply = cleanReplyForUi(reply, products.length);
 
-    return Response.json({
-      reply: extractText(data),
-      debug: extractToolDebug(data),
-    });
+return Response.json({
+  reply: displayReply,
+  products,
+  debug: extractToolDebug(data),
+});
   } catch (error) {
     console.error("Agent route error:", error);
 
