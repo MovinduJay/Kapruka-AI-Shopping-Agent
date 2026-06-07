@@ -62,12 +62,12 @@ export function LocationPrompt({ location, onLocationShared }: Props) {
   if (dismissed) return null;
 
   return (
-    <div className="relative w-full max-w-3xl rounded-3xl border border-white/10 bg-white/[0.055] p-4 shadow-sm">
+    <div className="relative w-full max-w-3xl rounded-3xl border border-white/10 bg-slate-900 p-4 shadow-xl">
       <button
         type="button"
         onClick={() => setDismissed(true)}
         aria-label="Dismiss location suggestion"
-        className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-500 transition hover:bg-white/10 hover:text-white"
+        className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-500/25 hover:text-white"
       >
         <X size={16} />
       </button>
