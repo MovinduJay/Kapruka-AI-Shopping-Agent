@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  Copy,
+  Pencil,
   Moon,
   Send,
   ShoppingCart,
@@ -16,7 +18,11 @@ import {
 } from "@/components/chat/LocationPrompt";
 import { SearchProgress } from "@/components/chat/SearchProgress";
 import { WelcomeScreen } from "@/components/chat/WelcomeScreen";
-import { DeliveryPanel } from "@/components/delivery/DeliveryPanel";
+import { CheckoutPanel } from "@/components/checkout/CheckoutPanel";
+import {
+  DeliveryPanel,
+  type DeliveryResult,
+} from "@/components/delivery/DeliveryPanel";
 import { ProductCarousel } from "@/components/products/ProductCarousel";
 import type { ProductCard as ProductCardType } from "@/types/product";
 
@@ -55,14 +61,22 @@ function saveTheme(theme: Theme) {
 
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [chatStarted, setChatStarted] = useState(false);
   const [cart, setCart] = useState<ProductCardType[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [deliveryPanelOpen, setDeliveryPanelOpen] = useState(false);
+  const [checkoutPanelOpen, setCheckoutPanelOpen] = useState(false);
+  const [checkedDelivery, setCheckedDelivery] =
+    useState<DeliveryResult | null>(null);
   const [sharedLocation, setSharedLocation] =
     useState<SharedLocation | null>(null);
+  const [locationPromptDismissed, setLocationPromptDismissed] = useState(false);
+  const [composerGlass, setComposerGlass] = useState(false);
   const theme = useSyncExternalStore(
     subscribeToTheme,
     getThemeSnapshot,
@@ -72,6 +86,29 @@ export default function Home() {
   useEffect(() => {
     document.documentElement.style.colorScheme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+      const scrollElement = chatScrollRef.current;
+
+      if (!scrollElement) return;
+
+      scrollElement.scrollTo({
+        top: scrollElement.scrollHeight,
+        behavior,
+      });
+    };
+
+    const frame = requestAnimationFrame(() => scrollToBottom("smooth"));
+    const shortDelay = window.setTimeout(() => scrollToBottom("smooth"), 120);
+    const layoutDelay = window.setTimeout(() => scrollToBottom("auto"), 420);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(shortDelay);
+      window.clearTimeout(layoutDelay);
+    };
+  }, [messages, loading]);
 
   function addToCart(product: ProductCardType) {
     setCart((prev) => {
@@ -87,11 +124,32 @@ export default function Home() {
     setCart((prev) => prev.filter((item) => item.id !== productId));
   }
 
+  function updateComposerGlass(element: HTMLDivElement) {
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+
+    setComposerGlass(distanceFromBottom > 120);
+  }
+
+  async function copyMessage(content: string) {
+    await navigator.clipboard.writeText(content);
+  }
+
+  function editUserMessage(content: string) {
+    setInput(content);
+    setLoading(false);
+
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }
+
   async function sendMessage(message?: string) {
     const userMessage = (message ?? input).trim();
 
     if (!userMessage || loading) return;
 
+    setChatStarted(true);
     setMessages((prev) => [
       ...prev,
       {
@@ -145,8 +203,10 @@ export default function Home() {
     (total, item) => total + (item.price || 0),
     0
   );
-  const isWelcome =
-    !loading && !messages.some((message) => message.role === "user");
+  const isWelcome = !chatStarted && !loading;
+  const latestUserMessage =
+    [...messages].reverse().find((message) => message.role === "user")
+      ?.content || "";
 
   return (
     <main
@@ -212,7 +272,11 @@ export default function Home() {
           />
         ) : (
           <>
-        <div className="flex-1 overflow-y-auto">
+        <div
+          ref={chatScrollRef}
+          className="flex-1 overflow-y-auto"
+          onScroll={(event) => updateComposerGlass(event.currentTarget)}
+        >
           <div className="mx-auto w-full max-w-6xl space-y-5 px-4 pb-40 pt-6 sm:px-6 sm:pb-44">
             {messages.map((message, index) => (
               <div
@@ -224,8 +288,8 @@ export default function Home() {
                 <div
                   className={
                     message.products && message.products.length > 0
-                      ? "w-full min-w-0"
-                      : "max-w-5xl"
+                      ? "group/message w-full min-w-0"
+                      : "group/message max-w-5xl"
                   }
                 >
                   <div
@@ -236,6 +300,32 @@ export default function Home() {
                     }`}
                   >
                     {message.content}
+                  </div>
+
+                  <div
+                    className={`pointer-events-none mt-1 flex h-7 gap-1.5 opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 ${
+                      message.role === "user" ? "justify-end" : "justify-start"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => copyMessage(message.content)}
+                      aria-label="Copy message"
+                      className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/10 hover:text-slate-200"
+                    >
+                      <Copy size={18} />
+                    </button>
+
+                    {message.role === "user" && (
+                      <button
+                        type="button"
+                        onClick={() => editUserMessage(message.content)}
+                        aria-label="Edit and resend message"
+                        className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/10 hover:text-slate-200"
+                      >
+                        <Pencil size={18} />
+                      </button>
+                    )}
                   </div>
 
                   {message.role === "assistant" &&
@@ -251,7 +341,7 @@ export default function Home() {
             ))}
 
             {loading && (
-              <SearchProgress />
+              <SearchProgress query={latestUserMessage} />
             )}
           </div>
         </div>
@@ -259,21 +349,34 @@ export default function Home() {
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 px-4 pb-6 sm:px-6 sm:pb-8">
           <div className="mx-auto w-full max-w-2xl space-y-3">
             {!loading &&
+              !locationPromptDismissed &&
+              !sharedLocation &&
               messages.some((message) => message.role === "user") && (
                 <div className="pointer-events-auto">
                   <LocationPrompt
                     location={sharedLocation}
-                    onLocationShared={setSharedLocation}
+                    onLocationShared={(location) => {
+                      setSharedLocation(location);
+                      setLocationPromptDismissed(true);
+                    }}
+                    onDismiss={() => setLocationPromptDismissed(true)}
                   />
                 </div>
               )}
 
-            <div className="pointer-events-auto flex gap-2 rounded-[28px] border border-white/15 bg-slate-900/35 p-2.5 shadow-[0_16px_45px_-22px_rgba(0,0,0,0.95)] backdrop-blur-2xl backdrop-saturate-150">
+            <div
+              className={`pointer-events-auto flex gap-2 rounded-[28px] border border-white/15 p-2.5 transition duration-200 ${
+                composerGlass
+                  ? "bg-slate-900/35 shadow-[0_16px_45px_-22px_rgba(0,0,0,0.95)] backdrop-blur-2xl backdrop-saturate-150"
+                  : "bg-slate-900"
+              }`}
+            >
               <div className="flex items-center pl-2 text-emerald-300">
                 <Sparkles size={19} />
               </div>
 
               <input
+                ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -398,6 +501,18 @@ export default function Home() {
         open={deliveryPanelOpen}
         productId={cart[0]?.id}
         onClose={() => setDeliveryPanelOpen(false)}
+        onContinueToCheckout={(result) => {
+          setCheckedDelivery(result);
+          setDeliveryPanelOpen(false);
+          setCheckoutPanelOpen(true);
+        }}
+      />
+
+      <CheckoutPanel
+        open={checkoutPanelOpen}
+        cart={cart}
+        delivery={checkedDelivery}
+        onClose={() => setCheckoutPanelOpen(false)}
       />
     </main>
   );

@@ -12,14 +12,18 @@ export type SharedLocation = {
 type Props = {
   location: SharedLocation | null;
   onLocationShared: (location: SharedLocation) => void;
+  onDismiss: () => void;
 };
 
 type LocationStatus = "idle" | "loading" | "error";
 
-export function LocationPrompt({ location, onLocationShared }: Props) {
+export function LocationPrompt({
+  location,
+  onLocationShared,
+  onDismiss,
+}: Props) {
   const [status, setStatus] = useState<LocationStatus>("idle");
   const [error, setError] = useState("");
-  const [dismissed, setDismissed] = useState(false);
 
   function shareLocation() {
     if (!navigator.geolocation || status === "loading") {
@@ -59,13 +63,11 @@ export function LocationPrompt({ location, onLocationShared }: Props) {
     );
   }
 
-  if (dismissed) return null;
-
   return (
     <div className="relative w-full max-w-3xl rounded-3xl border border-white/10 bg-slate-900 p-4 shadow-xl">
       <button
         type="button"
-        onClick={() => setDismissed(true)}
+        onClick={onDismiss}
         aria-label="Dismiss location suggestion"
         className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-500/25 hover:text-white"
       >

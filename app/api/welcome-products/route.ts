@@ -50,6 +50,57 @@ const WELCOME_SEARCHES = [
   { key: "home", query: "kitchen" },
 ] as const;
 
+const FALLBACK_PRODUCTS: WelcomeProduct[] = [
+  {
+    key: "cakes",
+    name: "Triple Delight Gateau Cake",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/shops/cakes/productImages/zoom/1720431907031_dsc_9125s.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/triple-delight-gateau-cake/kid/cake00ka001679",
+  },
+  {
+    key: "flowers",
+    name: "Candle Flower Bouquet 35 Piece Arrangement",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/https://partnercentral.kapruka.com/kapruka-pc/assets/images/product/pc01519/home0v4477p00022/home0v4477p00022_1.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/candle-flower-bouquet-35-piece/kid/ef_pc_home0v4477p00022",
+  },
+  {
+    key: "electronics",
+    name: "Sony WF-C510 Truly Wireless Earbuds",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/https://partnercentral.kapruka.com/kapruka-pc/assets/images/product/pc01346/elec0v3077p00007/elec0v3077p00007_1.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/sony-wf-c510-truly-wireless-ea/kid/ef_pc_elec0v3077pod00007p",
+  },
+  {
+    key: "groceries",
+    name: "Cheer Delight Grocery Hamper",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/https://partnercentral.kapruka.com/kapruka-pc/assets/images/product/pc00006/hamp0v18p00017/hamp0v18p00017_1.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/cheer-delight-grocery-hamper/kid/ef_pc_hamp0v18pod00017p",
+  },
+  {
+    key: "fashion",
+    name: "Flowery Cloth (MDG)",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/shops/specialGifts/productImages/168498373412622_flowery-cloth-700x754_m.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/flowery-cloth-mdg/kid/book00903",
+  },
+  {
+    key: "home",
+    name: "Airtight Ceramic Kitchen Canister",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/shops/specialGifts/productImages/1640586413215_img_0119_m.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/airtight-ceramic-kitchen-canis/kid/household00498",
+  },
+];
+
 let welcomeProductsCache: {
   expiresAt: number;
   products: WelcomeProduct[];
@@ -215,13 +266,24 @@ export async function GET() {
       if (product) products.push(product);
     }
 
-    welcomeProductsCache = {
-      expiresAt: Date.now() + 15 * 60 * 1000,
-      products,
-    };
+    const responseProducts =
+      products.length === WELCOME_SEARCHES.length
+        ? products
+        : FALLBACK_PRODUCTS.map(
+            (fallback) =>
+              products.find((product) => product.key === fallback.key) ||
+              fallback
+          );
+
+    if (responseProducts.length > 0) {
+      welcomeProductsCache = {
+        expiresAt: Date.now() + 15 * 60 * 1000,
+        products: responseProducts,
+      };
+    }
 
     return Response.json(
-      { products },
+      { products: responseProducts },
       {
         headers: {
           "Cache-Control":
@@ -232,6 +294,13 @@ export async function GET() {
   } catch (error) {
     console.error("Welcome product image error:", error);
 
-    return Response.json({ products: [] });
+    return Response.json(
+      { products: FALLBACK_PRODUCTS },
+      {
+        headers: {
+          "Cache-Control": "public, max-age=300, stale-while-revalidate=3600",
+        },
+      }
+    );
   }
 }

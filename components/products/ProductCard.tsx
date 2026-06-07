@@ -20,8 +20,8 @@ export function ProductCard({ product, onAddToCart }: Props) {
       : null;
 
   return (
-    <article className="group flex h-full flex-col overflow-hidden rounded-[30px] border border-white/[0.09] bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-2 shadow-[0_18px_45px_-24px_rgba(0,0,0,0.9)] transition duration-300 hover:-translate-y-1.5 hover:border-emerald-300/70 hover:shadow-[0_24px_58px_-20px_rgba(16,185,129,0.5)]">
-      <div className="relative aspect-square overflow-hidden rounded-[24px] border border-white/[0.06] bg-slate-900 shadow-inner">
+    <article className="product-card group flex h-full flex-col overflow-hidden rounded-[30px] border border-white/[0.09] bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-2 shadow-none transition duration-300 hover:border-emerald-300/70 hover:shadow-[0_8px_20px_-16px_rgba(16,185,129,0.4)]">
+      <div className="relative aspect-square overflow-hidden rounded-[24px] border border-white/[0.06] bg-slate-900">
         {imageUrl ? (
           <img
             src={imageUrl}
@@ -38,9 +38,9 @@ export function ProductCard({ product, onAddToCart }: Props) {
         )}
       </div>
 
-      <div className="flex flex-1 flex-col px-3.5 pb-3.5 pt-4">
+      <div className="flex flex-1 flex-col px-3.5 pb-3.5 pt-3">
         <div>
-          <h3 className="line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-white">
+          <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-white">
             {product.name}
           </h3>
 
@@ -49,16 +49,16 @@ export function ProductCard({ product, onAddToCart }: Props) {
           </p>
         </div>
 
-        <p className="mt-3 line-clamp-2 min-h-10 text-xs leading-5 text-slate-400">
+        <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-400">
           {product.description ||
             product.reason ||
             "Open the product to view full details."}
         </p>
 
-        <div className="mt-auto flex gap-2 pt-4">
+        <div className="mt-auto flex gap-2 pt-3">
           <button
             onClick={() => onAddToCart(product)}
-            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-3 py-2.5 text-xs font-semibold text-white shadow-lg shadow-emerald-950/30 transition hover:bg-emerald-400"
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-3 py-2.5 text-xs font-semibold text-white transition hover:bg-emerald-400"
           >
             <ShoppingCart size={14} />
             Add

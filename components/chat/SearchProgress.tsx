@@ -1,37 +1,55 @@
-import { ScanSearch, Store } from "lucide-react";
+const shoppingProgressSteps = [
+  "Looking through Kapruka products",
+  "Checking prices and availability",
+  "Matching useful options",
+  "Getting the best results ready",
+];
 
-export function SearchProgress() {
+type Props = {
+  query?: string;
+};
+
+function looksLikeShoppingQuery(query: string) {
+  const normalized = query.toLowerCase();
+
+  return (
+    /\b(?:buy|shop|shopping|product|item|price|budget|under|below|rs|lkr|delivery|cart|checkout|order|gift|cake|flower|flowers|electronics|grocery|groceries|fashion|home|supplement|vitamin|headphone|earbud|phone|laptop|toy|hamper)\b/.test(
+      normalized
+    ) || /\b\d{3,}\b/.test(normalized)
+  );
+}
+
+export function SearchProgress({ query = "" }: Props) {
+  const isShoppingQuery = looksLikeShoppingQuery(query);
+
   return (
     <div
       role="status"
       aria-live="polite"
-      className="w-full max-w-2xl space-y-2"
+      className="w-fit max-w-full"
     >
-      <div className="w-fit rounded-[28px] rounded-bl-md border border-white/[0.06] bg-slate-800 px-5 py-3 text-sm text-slate-200 shadow-sm">
-        Finding the best options on Kapruka...
-      </div>
-
-      <div className="rounded-[28px] border border-white/[0.08] bg-slate-800 px-5 py-4 shadow-sm">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 rounded-xl bg-emerald-500/15 p-2 text-emerald-300">
-            <Store size={18} />
-          </div>
-
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-white">
-              Searching Kapruka marketplace
-            </p>
-            <p className="mt-1 text-sm text-slate-400">
-              Checking matching products, prices, availability, and seller
-              listings.
-            </p>
-          </div>
-
-          <ScanSearch
-            size={20}
-            className="shrink-0 animate-pulse text-emerald-300"
-          />
+      <div className="inline-flex max-w-full items-center gap-3 rounded-[28px] rounded-bl-md border border-white/[0.06] bg-slate-800 px-5 py-4 shadow-sm">
+        <div className="search-wave-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
         </div>
+
+        {isShoppingQuery && (
+          <div className="grid min-w-0 overflow-hidden text-base text-slate-300">
+            {shoppingProgressSteps.map((step, index) => (
+              <p
+                key={step}
+                className="search-progress-step col-start-1 row-start-1 truncate"
+                style={{
+                  animationDelay: `${index * 1400}ms`,
+                }}
+              >
+                {step}
+              </p>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

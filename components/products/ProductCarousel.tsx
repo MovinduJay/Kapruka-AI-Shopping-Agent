@@ -58,7 +58,7 @@ export function ProductCarousel({ products, onAddToCart }: Props) {
         {products.map((product) => (
           <div
             key={product.id}
-            className="min-h-[31rem] w-[82%] shrink-0 snap-start sm:w-[calc((100%_-_1rem)/2)] lg:min-h-[32rem] lg:w-[calc((100%_-_2rem)/3)] xl:w-[calc((100%_-_3rem)/4)] 2xl:w-[calc((100%_-_4rem)/5)]"
+            className="w-[82%] shrink-0 snap-start sm:w-[calc((100%_-_1rem)/2)] lg:w-[calc((100%_-_2rem)/3)] xl:w-[calc((100%_-_3rem)/4)]"
           >
             <ProductCard product={product} onAddToCart={onAddToCart} />
           </div>

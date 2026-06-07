@@ -28,6 +28,7 @@ type Props = {
   open: boolean;
   productId?: string;
   onClose: () => void;
+  onContinueToCheckout?: (result: DeliveryResult) => void;
 };
 
 function getSriLankaDate() {
@@ -83,7 +84,12 @@ function getCalendarDays(month: Date) {
   });
 }
 
-export function DeliveryPanel({ open, productId, onClose }: Props) {
+export function DeliveryPanel({
+  open,
+  productId,
+  onClose,
+  onContinueToCheckout,
+}: Props) {
   const [city, setCity] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
   const [calendarMonth, setCalendarMonth] = useState(() => {
@@ -443,9 +449,21 @@ export function DeliveryPanel({ open, productId, onClose }: Props) {
                 )}
 
                 {result.available && (
-                  <p className="mt-5 border-t border-white/10 pt-4 text-xs text-slate-400">
-                    Delivery confirmed. Address and checkout details come next.
-                  </p>
+                  <div className="mt-5 border-t border-white/10 pt-4">
+                    <p className="text-xs text-slate-400">
+                      Delivery confirmed. Address and checkout details come next.
+                    </p>
+
+                    {onContinueToCheckout && (
+                      <button
+                        type="button"
+                        onClick={() => onContinueToCheckout(result)}
+                        className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-400"
+                      >
+                        Continue to checkout details
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}

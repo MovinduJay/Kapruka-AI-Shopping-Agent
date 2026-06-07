@@ -729,9 +729,16 @@ function mergeProducts(mcpProducts: ProductLike[], textProducts: ProductLike[]) 
 
     if (!existing) continue;
 
+    const existingLooksOrderable = looksLikeKaprukaProductId(existing.id);
+    const productLooksOrderable = looksLikeKaprukaProductId(product.id);
+
     unique.set(key, {
       ...existing,
       ...product,
+      id:
+        existingLooksOrderable || !productLooksOrderable
+          ? existing.id
+          : product.id,
       imageUrl: existing.imageUrl || product.imageUrl,
       productUrl: existing.productUrl || product.productUrl,
       price: existing.price ?? product.price,
@@ -741,6 +748,12 @@ function mergeProducts(mcpProducts: ProductLike[], textProducts: ProductLike[]) 
   }
 
   return Array.from(unique.values()).slice(0, 8);
+}
+
+function looksLikeKaprukaProductId(id: string) {
+  return /^[a-z][a-z0-9_]*(?:ka|pc|v|0|pod|pack|hamper|gift|book|household|cake|flow|elec|hamp)[a-z0-9_-]*$/i.test(
+    id
+  );
 }
 
 async function getImageFromProductPage(productUrl: string) {
@@ -887,6 +900,7 @@ Language matching rules:
 
 Shopping rules:
 - Use Kapruka tools for product search, product details, categories, delivery cities, and delivery availability.
+- Do not call product search tools for greetings, thanks, small talk, or unclear one-word messages. Reply naturally and ask what they want to shop for.
 - Never invent product names, prices, stock, delivery availability, product URLs, images, or checkout links.
 - Search the full marketplace. Do not steer ordinary requests toward gifts, cakes, flowers, or hampers.
 - Assume the user is buying for themselves unless they indicate otherwise.
@@ -1055,6 +1069,18 @@ async function callGroq(
   });
 }
 
+function isPlainGreeting(message: string) {
+  const normalized = message
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return /^(?:hi|hello|hey|helo|hii|hiii|yo|sup|good morning|good afternoon|good evening|ayubowan|vanakkam|kohomada|mk|mokada|ela|hari|හලෝ|හායි|ආයුබෝවන්)$/.test(
+    normalized
+  );
+}
+
 export async function POST(req: Request) {
   try {
     const { message, location: rawLocation } = await req.json();
@@ -1062,6 +1088,15 @@ export async function POST(req: Request) {
 
     if (!message || typeof message !== "string") {
       return Response.json({ error: "Message is required" }, { status: 400 });
+    }
+
+    if (isPlainGreeting(message)) {
+      return Response.json({
+        reply:
+          "Hi. Tell me what you want to shop for, or what problem you’re trying to solve. I can help with products, prices, delivery, and comparisons.",
+        products: [],
+        debug: [],
+      });
     }
 
     if (!process.env.GROQ_API_KEY) {
