@@ -8,7 +8,7 @@ type GroqOutputItem = {
   role?: string;
   name?: string;
   arguments?: string;
-  output?: string;
+  output?: unknown;
   content?: GroqOutputContent[];
 };
 
@@ -23,6 +23,25 @@ type GroqResponse = {
   };
 };
 
+type AnyRecord = Record<string, unknown>;
+
+type ProductLike = {
+  id: string;
+  name: string;
+  price: number | null;
+  currency: "LKR";
+  imageUrl?: string | null;
+  productUrl?: string | null;
+  inStock?: boolean | null;
+  reason?: string;
+};
+
+const productImageCache = new Map<string, string | null>();
+
+function isRecord(value: unknown): value is AnyRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function extractText(response: GroqResponse): string {
   const output = response.output || [];
 
@@ -33,6 +52,7 @@ function extractText(response: GroqResponse): string {
       const text = item.content
         .filter((content) => content.type === "output_text")
         .map((content) => content.text)
+        .filter(Boolean)
         .join("\n")
         .trim();
 
@@ -57,15 +77,483 @@ function cleanProductName(name: string) {
     .trim();
 }
 
+function isBadProductName(name: string) {
+  const cleaned = name.trim().toLowerCase();
+
+  return (
+    cleaned.startsWith("{") ||
+    cleaned.startsWith("[") ||
+    cleaned.includes('"result"') ||
+    cleaned.includes("kapruka search") ||
+    cleaned.includes("delivery available") ||
+    cleaned.includes("delivery fee") ||
+    cleaned.includes("no products found") ||
+    cleaned.length > 150
+  );
+}
+
+function removeRoboticLines(reply: string) {
+  const bannedPatterns = [
+    /gifts that come from the heart/i,
+    /always the most precious/i,
+    /resonates with/i,
+    /truly memorable birthday celebration/i,
+    /delightful experience/i,
+    /perfect choice for your loved one/i,
+  ];
+
+  return reply
+    .split("\n")
+    .filter((line) => !bannedPatterns.some((pattern) => pattern.test(line)))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function normalizeUrl(url: string | null | undefined) {
+  if (!url) return null;
+
+  const cleaned = url.trim().replace(/[),.]+$/g, "");
+
+  if (!cleaned) return null;
+
+  if (cleaned.startsWith("http://") || cleaned.startsWith("https://")) {
+    return cleaned;
+  }
+
+  if (cleaned.startsWith("//")) {
+    return `https:${cleaned}`;
+  }
+
+  if (cleaned.startsWith("/")) {
+    return `https://www.kapruka.com${cleaned}`;
+  }
+
+  return cleaned;
+}
+
+function pickString(obj: AnyRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = obj[key];
+
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function pickNumber(obj: AnyRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = obj[key];
+
+    if (typeof value === "number") {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const match = value.replace(/,/g, "").match(/(\d+(\.\d+)?)/);
+
+      if (match) {
+        return Number(match[1]);
+      }
+    }
+  }
+
+  return null;
+}
+
+function pickBoolean(obj: AnyRecord, keys: string[]) {
+  for (const key of keys) {
+    const value = obj[key];
+
+    if (typeof value === "boolean") return value;
+
+    if (typeof value === "string") {
+      if (value.toLowerCase() === "true") return true;
+      if (value.toLowerCase() === "false") return false;
+    }
+  }
+
+  return null;
+}
+
+function pickNestedImageUrl(obj: AnyRecord) {
+  const direct = pickString(obj, [
+    "image",
+    "image_url",
+    "imageUrl",
+    "imageURL",
+    "thumbnail",
+    "thumbnail_url",
+    "thumbnailUrl",
+    "main_image",
+    "mainImage",
+    "img",
+    "img_url",
+    "photo",
+    "photo_url",
+    "picture",
+    "picture_url",
+  ]);
+
+  if (direct) return normalizeUrl(direct);
+
+  const images = obj.images;
+
+  if (Array.isArray(images)) {
+    for (const image of images) {
+      if (typeof image === "string") {
+        const url = normalizeUrl(image);
+        if (url) return url;
+      }
+
+      if (isRecord(image)) {
+        const nested = pickString(image, [
+          "url",
+          "src",
+          "image",
+          "image_url",
+          "thumbnail",
+          "large",
+          "medium",
+          "small",
+        ]);
+
+        if (nested) return normalizeUrl(nested);
+      }
+    }
+  }
+
+  return null;
+}
+
+function pickNestedProductUrl(obj: AnyRecord) {
+  const direct = pickString(obj, [
+    "url",
+    "product_url",
+    "productUrl",
+    "productURL",
+    "link",
+    "href",
+    "web_url",
+    "webUrl",
+    "details_url",
+    "detailsUrl",
+    "kapruka_url",
+    "kaprukaUrl",
+  ]);
+
+  return normalizeUrl(direct);
+}
+
+function parsePossibleJson(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeProduct(obj: AnyRecord) {
+  const name = pickString(obj, [
+    "name",
+    "title",
+    "product_name",
+    "productName",
+    "display_name",
+    "displayName",
+  ]);
+
+  const price = pickNumber(obj, [
+    "price",
+    "price_lkr",
+    "lkr_price",
+    "selling_price",
+    "sellingPrice",
+    "amount",
+    "unit_price",
+    "unitPrice",
+  ]);
+
+  const id = pickString(obj, [
+    "id",
+    "product_id",
+    "productId",
+    "product_code",
+    "productCode",
+    "code",
+    "item_code",
+    "itemCode",
+    "sku",
+  ]);
+
+  const imageUrl = pickNestedImageUrl(obj);
+  const productUrl = pickNestedProductUrl(obj);
+
+  return Boolean(name && (price !== null || id || imageUrl || productUrl));
+}
+
+function collectProductObjects(value: unknown, output: AnyRecord[] = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectProductObjects(item, output);
+    }
+
+    return output;
+  }
+
+  if (!isRecord(value)) {
+    return output;
+  }
+
+  if (looksLikeProduct(value)) {
+    output.push(value);
+    return output;
+  }
+
+  for (const nestedValue of Object.values(value)) {
+    collectProductObjects(nestedValue, output);
+  }
+
+  return output;
+}
+
+function productFromObject(obj: AnyRecord, index: number): ProductLike | null {
+  const rawName = pickString(obj, [
+    "name",
+    "title",
+    "product_name",
+    "productName",
+    "display_name",
+    "displayName",
+  ]);
+
+  if (!rawName) return null;
+
+  const name = cleanProductName(rawName);
+
+  if (isBadProductName(name)) return null;
+
+  const price = pickNumber(obj, [
+    "price",
+    "price_lkr",
+    "lkr_price",
+    "selling_price",
+    "sellingPrice",
+    "amount",
+    "unit_price",
+    "unitPrice",
+  ]);
+
+  const rawId =
+    pickString(obj, [
+      "id",
+      "product_id",
+      "productId",
+      "product_code",
+      "productCode",
+      "code",
+      "item_code",
+      "itemCode",
+      "sku",
+    ]) || `${index}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+
+  const imageUrl = pickNestedImageUrl(obj);
+  const productUrl = pickNestedProductUrl(obj);
+
+  const inStock = pickBoolean(obj, [
+    "in_stock",
+    "inStock",
+    "available",
+    "is_available",
+    "isAvailable",
+    "stock",
+  ]);
+
+  return {
+    id: String(rawId),
+    name,
+    price,
+    currency: "LKR",
+    imageUrl,
+    productUrl,
+    inStock,
+    reason: "Matched with your budget and occasion.",
+  };
+}
+
+function extractToolOutputText(item: GroqOutputItem) {
+  const possibleTexts: string[] = [];
+
+  if (typeof item.output === "string") {
+    possibleTexts.push(item.output);
+  }
+
+  if (item.output && typeof item.output !== "string") {
+    possibleTexts.push(JSON.stringify(item.output));
+  }
+
+  if (Array.isArray(item.content)) {
+    for (const content of item.content) {
+      if (typeof content.text === "string") {
+        possibleTexts.push(content.text);
+      }
+    }
+  }
+
+  return possibleTexts.join("\n").trim();
+}
+
+function extractProductsFromKaprukaSearchMarkdown(text: string) {
+  const products: ProductLike[] = [];
+
+  const regex =
+    /\*\*(?:\d+\.\s*)?(.+?)\*\*[\s\S]*?ID:\s*`?([^`\s]+)`?\s*·\s*LKR\s*([\d,]+)[\s\S]*?\[View product\]\((https?:\/\/[^)]+)\)/gi;
+
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    const name = cleanProductName(match[1]);
+    const id = match[2];
+    const price = Number(match[3].replace(/,/g, ""));
+    const productUrl = normalizeUrl(match[4]);
+
+    if (!name || Number.isNaN(price) || isBadProductName(name)) {
+      continue;
+    }
+
+    products.push({
+      id,
+      name,
+      price,
+      currency: "LKR",
+      imageUrl: null,
+      productUrl,
+      inStock: null,
+      reason: "Matched with your request.",
+    });
+  }
+
+  return products;
+}
+
+function extractProductsFromMarkdownToolOutput(text: string) {
+  const products: ProductLike[] = [];
+
+  const blocks = text
+    .split(/\n(?=\s*(?:\d+[\).\s-]+|[-*]\s+|###?\s+|\{))/g)
+    .map((block) => block.trim())
+    .filter(Boolean);
+
+  for (let index = 0; index < blocks.length; index++) {
+    const block = blocks[index];
+
+    const imageMatch =
+      block.match(/!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/i) ||
+      block.match(
+        /["']?(?:image|image_url|imageUrl|thumbnail|thumbnail_url|img|photo)["']?\s*[:=]\s*["']?(https?:\/\/[^"',\s)]+)/i
+      );
+
+    const urlMatch =
+      block.match(
+        /["']?(?:url|product_url|productUrl|link|href|web_url)["']?\s*[:=]\s*["']?(https?:\/\/[^"',\s)]+)/i
+      ) ||
+      block.match(
+        /\[.*?]\((https?:\/\/(?:www\.)?kapruka\.com[^)\s]+)\)/i
+      );
+
+    const priceMatch =
+      block.match(/(?:Rs\.?|LKR)\s*([\d,]+(?:\.\d+)?)/i) ||
+      block.match(
+        /["']?(?:price|price_lkr|lkr_price|selling_price)["']?\s*[:=]\s*["']?([\d,]+(?:\.\d+)?)/i
+      );
+
+    const idMatch = block.match(
+      /["']?(?:product[_\s-]*id|productId|id|sku|code)["']?\s*[:=]\s*["']?([A-Za-z0-9_-]+)/i
+    );
+
+    const jsonNameMatch = block.match(
+      /["']?(?:name|title|product_name|productName)["']?\s*[:=]\s*["']([^"']+)["']/i
+    );
+
+    const lines = block
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    let rawName =
+      jsonNameMatch?.[1] ||
+      lines
+        .map((line) =>
+          line
+            .replace(/^\d+[\).\s-]+/, "")
+            .replace(/^[-*]\s+/, "")
+            .replace(/^#+\s+/, "")
+            .replace(/\*\*/g, "")
+            .trim()
+        )
+        .find((line) => {
+          const lower = line.toLowerCase();
+
+          return (
+            line.length > 3 &&
+            !lower.startsWith("price") &&
+            !lower.startsWith("image") &&
+            !lower.startsWith("thumbnail") &&
+            !lower.startsWith("url") &&
+            !lower.startsWith("link") &&
+            !lower.startsWith("product id") &&
+            !/^rs\.?\s*\d/i.test(lower) &&
+            !/^lkr\s*\d/i.test(lower)
+          );
+        }) ||
+      null;
+
+    if (rawName) {
+      rawName = rawName
+        .replace(/!\[[^\]]*]\([^)]+\)/g, "")
+        .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
+        .replace(/\s*[-\u2013:]\s*(?:Rs\.?|LKR)\s*[\d,]+.*/i, "")
+        .trim();
+    }
+
+    const name = rawName ? cleanProductName(rawName) : null;
+    const price = priceMatch ? Number(priceMatch[1].replace(/,/g, "")) : null;
+    const imageUrl = normalizeUrl(imageMatch?.[1]);
+    const productUrl = normalizeUrl(urlMatch?.[1]);
+
+    if (!name || isBadProductName(name) || (!price && !imageUrl && !productUrl)) {
+      continue;
+    }
+
+    products.push({
+      id:
+        idMatch?.[1] ||
+        `${index}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      name,
+      price,
+      currency: "LKR",
+      imageUrl,
+      productUrl,
+      inStock: null,
+      reason: "Matched with your request.",
+    });
+  }
+
+  return products;
+}
+
 function extractProductsFromReply(reply: string) {
   const lines = reply.split("\n");
-  const products = [];
+  const products: ProductLike[] = [];
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
 
     const match = line.match(
-      /^\s*(?:\d+[\).\s-]+)?(.+?)\s*[-–:]\s*(?:Rs\.?|LKR)\s*([\d,]+)/i
+      /^\s*(?:\d+[\).\s-]+)?(.+?)\s*[-\u2013:]\s*(?:Rs\.?|LKR)\s*([\d,]+)/i
     );
 
     if (!match) continue;
@@ -73,7 +561,7 @@ function extractProductsFromReply(reply: string) {
     const name = cleanProductName(match[1]);
     const price = Number(match[2].replace(/,/g, ""));
 
-    if (!name || Number.isNaN(price)) continue;
+    if (!name || isBadProductName(name) || Number.isNaN(price)) continue;
 
     const nextLine = lines[index + 1]?.trim() || "";
     const reasonMatch = nextLine.match(/^Reason\s*:\s*(.+)$/i);
@@ -82,7 +570,7 @@ function extractProductsFromReply(reply: string) {
       id: `${index}-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
       name,
       price,
-      currency: "LKR" as const,
+      currency: "LKR",
       imageUrl: null,
       productUrl: null,
       inStock: null,
@@ -90,17 +578,176 @@ function extractProductsFromReply(reply: string) {
     });
   }
 
-  const unique = new Map();
+  const unique = new Map<string, ProductLike>();
 
   for (const product of products) {
-    const key = product.name.toLowerCase();
+    const key = product.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
 
     if (!unique.has(key)) {
       unique.set(key, product);
     }
   }
 
-  return Array.from(unique.values()).slice(0, 6);
+  return Array.from(unique.values()).slice(0, 8);
+}
+
+function extractProductsFromMcpResponse(response: GroqResponse) {
+  const products: ProductLike[] = [];
+
+  for (const item of response.output || []) {
+    if (item.type !== "mcp_call") continue;
+
+    const outputText = extractToolOutputText(item);
+
+    if (!outputText) continue;
+
+    const parsed = parsePossibleJson(outputText);
+
+    if (parsed) {
+      const productObjects = collectProductObjects(parsed);
+
+      for (const productObject of productObjects) {
+        const product = productFromObject(productObject, products.length);
+
+        if (product) {
+          products.push(product);
+        }
+      }
+
+      if (isRecord(parsed) && typeof parsed.result === "string") {
+        products.push(...extractProductsFromKaprukaSearchMarkdown(parsed.result));
+        products.push(...extractProductsFromMarkdownToolOutput(parsed.result));
+      }
+    } else {
+      products.push(...extractProductsFromKaprukaSearchMarkdown(outputText));
+      products.push(...extractProductsFromMarkdownToolOutput(outputText));
+    }
+  }
+
+  const unique = new Map<string, ProductLike>();
+
+  for (const product of products) {
+    const key = product.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
+    if (!unique.has(key)) {
+      unique.set(key, product);
+      continue;
+    }
+
+    const existing = unique.get(key);
+
+    if (!existing) continue;
+
+    unique.set(key, {
+      ...existing,
+      ...product,
+      imageUrl: existing.imageUrl || product.imageUrl,
+      productUrl: existing.productUrl || product.productUrl,
+      price: existing.price ?? product.price,
+      reason: existing.reason || product.reason,
+    });
+  }
+
+  return Array.from(unique.values()).slice(0, 8);
+}
+
+function mergeProducts(mcpProducts: ProductLike[], textProducts: ProductLike[]) {
+  const unique = new Map<string, ProductLike>();
+
+  for (const product of [...mcpProducts, ...textProducts]) {
+    const key = product.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+
+    if (!unique.has(key)) {
+      unique.set(key, product);
+      continue;
+    }
+
+    const existing = unique.get(key);
+
+    if (!existing) continue;
+
+    unique.set(key, {
+      ...existing,
+      ...product,
+      imageUrl: existing.imageUrl || product.imageUrl,
+      productUrl: existing.productUrl || product.productUrl,
+      price: existing.price ?? product.price,
+      reason: existing.reason || product.reason,
+    });
+  }
+
+  return Array.from(unique.values()).slice(0, 8);
+}
+
+async function getImageFromProductPage(productUrl: string) {
+  if (productImageCache.has(productUrl)) {
+    return productImageCache.get(productUrl) || null;
+  }
+
+  try {
+    const response = await fetch(productUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 KaprukaAIConcierge/1.0",
+      },
+    });
+
+    if (!response.ok) {
+      productImageCache.set(productUrl, null);
+      return null;
+    }
+
+    const html = await response.text();
+
+    const imageMatch =
+      html.match(
+        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
+      ) ||
+      html.match(
+        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i
+      ) ||
+      html.match(
+        /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i
+      ) ||
+      html.match(
+        /<img[^>]+src=["']([^"']+)["'][^>]+(?:class|id)=["'][^"']*(?:product|main|large)[^"']*["']/i
+      );
+
+    const imageUrl = normalizeUrl(imageMatch?.[1]);
+
+    productImageCache.set(productUrl, imageUrl);
+
+    return imageUrl;
+  } catch (error) {
+    console.warn("Could not fetch product image:", productUrl, error);
+    productImageCache.set(productUrl, null);
+    return null;
+  }
+}
+
+async function enrichProductsWithImages(products: ProductLike[]) {
+  return Promise.all(
+    products.map(async (product) => {
+      if (product.imageUrl || !product.productUrl) {
+        return product;
+      }
+
+      const imageUrl = await getImageFromProductPage(product.productUrl);
+
+      return {
+        ...product,
+        imageUrl,
+      };
+    })
+  );
 }
 
 function cleanReplyForUi(reply: string, productCount: number) {
@@ -110,7 +757,9 @@ function cleanReplyForUi(reply: string, productCount: number) {
     const trimmed = line.trim();
 
     const isProductLine =
-      /^\d+[\).\s-]+.+?\s*[-–:]\s*(?:Rs\.?|LKR)\s*[\d,]+/i.test(trimmed);
+      /^\d+[\).\s-]+.+?\s*[-\u2013:]\s*(?:Rs\.?|LKR)\s*[\d,]+/i.test(
+        trimmed
+      );
 
     const isReasonLine = /^Reason\s*:/i.test(trimmed);
 
@@ -128,11 +777,7 @@ function cleanReplyForUi(reply: string, productCount: number) {
 
 function extractToolDebug(response: GroqResponse) {
   return (response.output || [])
-    .filter(
-      (item) =>
-        item.type === "mcp_list_tools" ||
-        item.type === "mcp_call"
-    )
+    .filter((item) => item.type === "mcp_list_tools" || item.type === "mcp_call")
     .map((item) => ({
       type: item.type,
       name: item.name,
@@ -157,6 +802,18 @@ Personality and voice:
 - Do not end with generic inspirational advice.
 - End with a useful next action, like asking which item to add to cart, whether to check delivery, or whether they want a more premium/budget option.
 
+Good English style:
+"Nice. For your brother, I would avoid anything too formal and go for something useful or funny. These options fit the birthday vibe and stay under Rs. 10,000."
+
+Bad English style:
+"Remember, gifts that come from the heart are always the most precious."
+
+Good Singlish style:
+"Ela, brother ge birthday ekata mug/card type gifts tikak set wenawa. Habai oya funny vibe ekak da, premium vibe ekak da balanne?"
+
+Bad Singlish style:
+"Hadawathin dena thagga thamai watinma thagga."
+
 Language matching rules:
 - Detect the user's language style.
 - If the user writes in English, reply in English.
@@ -164,21 +821,11 @@ Language matching rules:
 - If the user writes in Sinhala script, reply in Sinhala script.
 - Product names can stay in English exactly as Kapruka returns them.
 - Prices, delivery fees, product names, and stock details must stay accurate.
-- For Singlish replies, keep the tone friendly and local, but still clear.
 - Do not translate product names badly.
-
-Example:
-User: Amma ge birthday ekata Rs 8000ta gift ekak one Kandy walata
-
-Correct reply style:
-Amma ge birthday ekata Rs 8000 budget eka athule me options tika hondai. Kandy delivery available. Delivery fee eka Rs 1075 wage pennanawa.
-
-Wrong reply style:
-Here are some birthday gifts for your mother under Rs 8000.
 
 Shopping rules:
 - Use Kapruka tools for product search, product details, categories, delivery cities, and delivery availability.
-- Never invent product names, prices, stock, delivery availability, product URLs, or checkout links.
+- Never invent product names, prices, stock, delivery availability, product URLs, images, or checkout links.
 - If user gives budget, respect it.
 - If user gives city/date, check delivery when possible.
 - If important details are missing, ask one short follow-up question.
@@ -188,10 +835,11 @@ Search quality rules:
 - For Tanglish/Sinhala requests, convert the user's intent into strong English search keywords before calling tools.
 - If the recipient is mother, amma, mom, or අම්මා, prefer search keywords like "mother birthday flowers cake chocolate hamper gift".
 - If the recipient is father, appachchi, dad, or තාත්තා, prefer search keywords like "father birthday hamper chocolate cake gift".
+- If the user asks for brother, aiya, malli, or සහෝදරයා, prefer search keywords like "brother birthday mug hamper chocolate cake gift".
 - If the user asks for girlfriend, wife, anniversary, or love, prefer flowers, chocolates, cakes, romantic gifts, and greeting cards.
 - Avoid irrelevant kids, superhero, boyfriend, girlfriend, or "for him" items unless the user asks for them.
 - De-duplicate products before replying.
-- Recommend only the best 5 products, not 10.
+- Recommend 6 to 8 good products when available. Avoid duplicates.
 - Clean messy HTML entities from product names before replying.
 - Give a short reason why each product matches the recipient and occasion.
 - If the search results are weak, do another better search with improved keywords.
@@ -215,7 +863,7 @@ Correct kapruka_search_products example:
   "params": {
     "q": "mother birthday flowers cake chocolate hamper gift",
     "category": null,
-    "limit": 6,
+    "limit": 10,
     "cursor": null,
     "currency": "LKR",
     "min_price": 0,
@@ -240,25 +888,6 @@ Wrong example:
 ${isRetry ? "The previous tool call failed because argument types were wrong. Retry carefully using native JSON types only." : ""}
 `;
 }
-function removeRoboticLines(reply: string) {
-  const bannedPatterns = [
-    /gifts that come from the heart/i,
-    /always the most precious/i,
-    /resonates with/i,
-    /truly memorable birthday celebration/i,
-    /delightful experience/i,
-    /perfect choice for your loved one/i,
-  ];
-
-  return reply
-    .split("\n")
-    .filter((line) => {
-      return !bannedPatterns.some((pattern) => pattern.test(line));
-    })
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
 
 async function callGroq(message: string, isRetry: boolean) {
   return fetch("https://api.groq.com/openai/v1/responses", {
@@ -268,7 +897,8 @@ async function callGroq(message: string, isRetry: boolean) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.3-70b-versatile",
+      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      max_output_tokens: 700,
       input: [
         {
           role: "system",
@@ -284,8 +914,7 @@ async function callGroq(message: string, isRetry: boolean) {
           type: "mcp",
           server_label: "kapruka",
           server_url:
-            process.env.KAPRUKA_MCP_URL ||
-            "https://mcp.kapruka.com/mcp",
+            process.env.KAPRUKA_MCP_URL || "https://mcp.kapruka.com/mcp",
           server_description:
             "Kapruka Sri Lanka shopping tools for product search, product details, categories, delivery cities, delivery checks, guest checkout, and order tracking.",
           require_approval: "never",
@@ -307,10 +936,7 @@ export async function POST(req: Request) {
     const { message } = await req.json();
 
     if (!message || typeof message !== "string") {
-      return Response.json(
-        { error: "Message is required" },
-        { status: 400 }
-      );
+      return Response.json({ error: "Message is required" }, { status: 400 });
     }
 
     if (!process.env.GROQ_API_KEY) {
@@ -341,16 +967,32 @@ export async function POST(req: Request) {
         { status: groqResponse.status }
       );
     }
-    
-const reply = removeRoboticLines(extractText(data));
-const products = extractProductsFromReply(reply);
-const displayReply = cleanReplyForUi(reply, products.length);
 
-return Response.json({
-  reply: displayReply,
-  products,
-  debug: extractToolDebug(data),
-});
+    const reply = removeRoboticLines(extractText(data));
+
+    const productsFromMcp = extractProductsFromMcpResponse(data);
+    const productsFromText = extractProductsFromReply(reply);
+
+    const mergedProducts = mergeProducts(productsFromMcp, productsFromText);
+    const products = await enrichProductsWithImages(mergedProducts);
+
+    const displayReply = cleanReplyForUi(reply, products.length);
+
+    console.log(
+      "Products sent to UI:",
+      products.map((product) => ({
+        name: product.name,
+        price: product.price,
+        imageUrl: product.imageUrl,
+        productUrl: product.productUrl,
+      }))
+    );
+
+    return Response.json({
+      reply: displayReply,
+      products,
+      debug: extractToolDebug(data),
+    });
   } catch (error) {
     console.error("Agent route error:", error);
 
