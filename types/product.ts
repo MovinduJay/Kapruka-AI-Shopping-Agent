@@ -6,5 +6,6 @@ export type ProductCard = {
   imageUrl?: string | null;
   productUrl?: string | null;
   inStock?: boolean | null;
+  description?: string | null;
   reason?: string;
 };

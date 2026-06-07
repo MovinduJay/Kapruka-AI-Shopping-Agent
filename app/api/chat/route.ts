@@ -25,6 +25,12 @@ type GroqResponse = {
 
 type AnyRecord = Record<string, unknown>;
 
+type LocationContext = {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+};
+
 type ProductLike = {
   id: string;
   name: string;
@@ -33,6 +39,7 @@ type ProductLike = {
   imageUrl?: string | null;
   productUrl?: string | null;
   inStock?: boolean | null;
+  description?: string | null;
   reason?: string;
 };
 
@@ -157,6 +164,22 @@ function pickNumber(obj: AnyRecord, keys: string[]) {
 
       if (match) {
         return Number(match[1]);
+      }
+    }
+
+    if (isRecord(value)) {
+      const amount = value.amount;
+
+      if (typeof amount === "number") {
+        return amount;
+      }
+
+      if (typeof amount === "string") {
+        const match = amount.replace(/,/g, "").match(/(\d+(\.\d+)?)/);
+
+        if (match) {
+          return Number(match[1]);
+        }
       }
     }
   }
@@ -362,6 +385,12 @@ function productFromObject(obj: AnyRecord, index: number): ProductLike | null {
 
   const imageUrl = pickNestedImageUrl(obj);
   const productUrl = pickNestedProductUrl(obj);
+  const description = pickString(obj, [
+    "summary",
+    "description",
+    "short_description",
+    "shortDescription",
+  ]);
 
   const inStock = pickBoolean(obj, [
     "in_stock",
@@ -380,7 +409,7 @@ function productFromObject(obj: AnyRecord, index: number): ProductLike | null {
     imageUrl,
     productUrl,
     inStock,
-    reason: "Matched with your budget and occasion.",
+    description,
   };
 }
 
@@ -432,7 +461,7 @@ function extractProductsFromKaprukaSearchMarkdown(text: string) {
       imageUrl: null,
       productUrl,
       inStock: null,
-      reason: "Matched with your request.",
+      description: null,
     });
   }
 
@@ -453,12 +482,12 @@ function extractProductsFromMarkdownToolOutput(text: string) {
     const imageMatch =
       block.match(/!\[[^\]]*]\((https?:\/\/[^)\s]+)\)/i) ||
       block.match(
-        /["']?(?:image|image_url|imageUrl|thumbnail|thumbnail_url|img|photo)["']?\s*[:=]\s*["']?(https?:\/\/[^"',\s)]+)/i
+        /["']?(?:image|image_url|imageUrl|thumbnail|thumbnail_url|img|photo)["']?\s*[:=]\s*["']?(https?:\/\/[^"'\s)]+)/i
       );
 
     const urlMatch =
       block.match(
-        /["']?(?:url|product_url|productUrl|link|href|web_url)["']?\s*[:=]\s*["']?(https?:\/\/[^"',\s)]+)/i
+        /["']?(?:url|product_url|productUrl|link|href|web_url)["']?\s*[:=]\s*["']?(https?:\/\/[^"'\s)]+)/i
       ) ||
       block.match(
         /\[.*?]\((https?:\/\/(?:www\.)?kapruka\.com[^)\s]+)\)/i
@@ -476,6 +505,9 @@ function extractProductsFromMarkdownToolOutput(text: string) {
 
     const jsonNameMatch = block.match(
       /["']?(?:name|title|product_name|productName)["']?\s*[:=]\s*["']([^"']+)["']/i
+    );
+    const descriptionMatch = block.match(
+      /["']?(?:summary|description|short_description|shortDescription)["']?\s*[:=]\s*["']([^"']+)["']/i
     );
 
     const lines = block
@@ -538,7 +570,9 @@ function extractProductsFromMarkdownToolOutput(text: string) {
       imageUrl,
       productUrl,
       inStock: null,
-      reason: "Matched with your request.",
+      description: descriptionMatch?.[1]
+        ? cleanProductName(descriptionMatch[1])
+        : null,
     });
   }
 
@@ -574,7 +608,8 @@ function extractProductsFromReply(reply: string) {
       imageUrl: null,
       productUrl: null,
       inStock: null,
-      reason: reasonMatch?.[1] || "Matched with your budget and occasion.",
+      description: null,
+      reason: reasonMatch?.[1] || "Matched with your request and budget.",
     });
   }
 
@@ -618,8 +653,26 @@ function extractProductsFromMcpResponse(response: GroqResponse) {
       }
 
       if (isRecord(parsed) && typeof parsed.result === "string") {
-        products.push(...extractProductsFromKaprukaSearchMarkdown(parsed.result));
-        products.push(...extractProductsFromMarkdownToolOutput(parsed.result));
+        const nestedResult = parsePossibleJson(parsed.result);
+
+        if (nestedResult) {
+          const nestedProductObjects = collectProductObjects(nestedResult);
+
+          for (const productObject of nestedProductObjects) {
+            const product = productFromObject(productObject, products.length);
+
+            if (product) {
+              products.push(product);
+            }
+          }
+        } else {
+          products.push(
+            ...extractProductsFromKaprukaSearchMarkdown(parsed.result)
+          );
+          products.push(
+            ...extractProductsFromMarkdownToolOutput(parsed.result)
+          );
+        }
       }
     } else {
       products.push(...extractProductsFromKaprukaSearchMarkdown(outputText));
@@ -650,6 +703,7 @@ function extractProductsFromMcpResponse(response: GroqResponse) {
       imageUrl: existing.imageUrl || product.imageUrl,
       productUrl: existing.productUrl || product.productUrl,
       price: existing.price ?? product.price,
+      description: existing.description || product.description,
       reason: existing.reason || product.reason,
     });
   }
@@ -681,6 +735,7 @@ function mergeProducts(mcpProducts: ProductLike[], textProducts: ProductLike[]) 
       imageUrl: existing.imageUrl || product.imageUrl,
       productUrl: existing.productUrl || product.productUrl,
       price: existing.price ?? product.price,
+      description: existing.description || product.description,
       reason: existing.reason || product.reason,
     });
   }
@@ -787,12 +842,19 @@ function extractToolDebug(response: GroqResponse) {
 
 function buildSystemPrompt(isRetry: boolean) {
   return `
-You are Kapruka AI Concierge, a premium Sri Lankan AI shopping assistant.
+You are Kapruka AI Concierge, a Sri Lankan AI marketplace shopping assistant.
 
-You help users shop from Kapruka using real Kapruka MCP tools.
+You help users shop across Kapruka's broad marketplace using real Kapruka MCP tools. Kapruka carries electronics, groceries, fashion, home products, daily essentials, gifts, and products from thousands of third-party sellers.
+
+Core customer model:
+- The primary user is shopping for their own everyday needs.
+- Do not assume a purchase is a gift, has a recipient, or has an occasion.
+- Treat gifting as one important shopping mode only when the user mentions a recipient, celebration, event, or gift intent.
+- Help users discover products, compare practical tradeoffs, stay within budget, and choose between marketplace options.
+- When seller, brand, size, compatibility, quantity, specifications, or delivery details affect the decision, surface those factors or ask one focused question.
 
 Personality and voice:
-- You are not a generic chatbot. You are a stylish Sri Lankan gift concierge.
+- You are not a generic chatbot. You are a capable, practical Sri Lankan shopping guide.
 - Sound warm, confident, helpful, and slightly witty.
 - Give honest opinions. Do not list products neutrally only.
 - Use short, human sentences.
@@ -803,13 +865,13 @@ Personality and voice:
 - End with a useful next action, like asking which item to add to cart, whether to check delivery, or whether they want a more premium/budget option.
 
 Good English style:
-"Nice. For your brother, I would avoid anything too formal and go for something useful or funny. These options fit the birthday vibe and stay under Rs. 10,000."
+"These earbuds fit your Rs. 15,000 budget. I would prioritize battery life and warranty over flashy extras; the first two are the strongest everyday options."
 
 Bad English style:
 "Remember, gifts that come from the heart are always the most precious."
 
 Good Singlish style:
-"Ela, brother ge birthday ekata mug/card type gifts tikak set wenawa. Habai oya funny vibe ekak da, premium vibe ekak da balanne?"
+"Hari, daily use ekata nam battery life saha warranty eka balala options compare karamu. Budget eka kiyanna."
 
 Bad Singlish style:
 "Hadawathin dena thagga thamai watinma thagga."
@@ -826,13 +888,25 @@ Language matching rules:
 Shopping rules:
 - Use Kapruka tools for product search, product details, categories, delivery cities, and delivery availability.
 - Never invent product names, prices, stock, delivery availability, product URLs, images, or checkout links.
+- Search the full marketplace. Do not steer ordinary requests toward gifts, cakes, flowers, or hampers.
+- Assume the user is buying for themselves unless they indicate otherwise.
+- For electronics, consider specifications, compatibility, warranty, brand, and practical value when data is available.
+- For groceries and essentials, consider quantity, pack size, unit value, availability, and delivery practicality when data is available.
+- For fashion, ask about size, fit, style, or intended use when necessary.
+- For home products, consider dimensions, material, use case, and compatibility when relevant.
+- Products may come from third-party sellers. Do not imply Kapruka directly manufactures or sells every item, and do not invent seller ratings or guarantees.
 - If user gives budget, respect it.
 - If user gives city/date, check delivery when possible.
 - If important details are missing, ask one short follow-up question.
 - Do not create an order. Checkout will be handled later after explicit user confirmation.
+- Browser coordinates are approximate context only. Do not claim an exact city, address, delivery fee, or delivery availability from coordinates.
+- If delivery location matters and the user has not named a city, ask them to confirm their delivery city.
 
 Search quality rules:
 - For Tanglish/Sinhala requests, convert the user's intent into strong English search keywords before calling tools.
+- Preserve product-defining terms such as model numbers, brands, sizes, capacities, colors, pack quantities, and compatibility requirements.
+- Use broad marketplace category terms for vague everyday requests, then narrow based on the returned products and user preferences.
+- Only apply recipient and occasion search expansion when the request is explicitly about gifting.
 - If the recipient is mother, amma, mom, or අම්මා, prefer search keywords like "mother birthday flowers cake chocolate hamper gift".
 - If the recipient is father, appachchi, dad, or තාත්තා, prefer search keywords like "father birthday hamper chocolate cake gift".
 - If the user asks for brother, aiya, malli, or සහෝදරයා, prefer search keywords like "brother birthday mug hamper chocolate cake gift".
@@ -841,8 +915,9 @@ Search quality rules:
 - De-duplicate products before replying.
 - Recommend 6 to 8 good products when available. Avoid duplicates.
 - Clean messy HTML entities from product names before replying.
-- Give a short reason why each product matches the recipient and occasion.
+- Give a short reason why each product matches the user's stated need, budget, and constraints.
 - If the search results are weak, do another better search with improved keywords.
+- Request JSON responses from product search so the UI can use each product's real summary, image, price, stock, and URL.
 - When listing products, use this exact format so the UI can create product cards:
   1. Product Name - Rs. 2990
      Reason: short reason here
@@ -856,21 +931,22 @@ Critical MCP tool argument rules:
 - min_price and max_price must be numbers or null.
 - in_stock_only and include_stubs must be booleans.
 - category and cursor must be null when not known, not "null".
-- Do not include unsupported fields like response_format.
+- Set response_format to "json" for kapruka_search_products.
 
 Correct kapruka_search_products example:
 {
   "params": {
-    "q": "mother birthday flowers cake chocolate hamper gift",
+    "q": "wireless earbuds bluetooth long battery life",
     "category": null,
     "limit": 10,
     "cursor": null,
     "currency": "LKR",
     "min_price": 0,
-    "max_price": 8000,
+    "max_price": 15000,
     "in_stock_only": false,
     "sort": "relevance",
-    "include_stubs": false
+    "include_stubs": false,
+    "response_format": "json"
   }
 }
 
@@ -889,7 +965,55 @@ ${isRetry ? "The previous tool call failed because argument types were wrong. Re
 `;
 }
 
-async function callGroq(message: string, isRetry: boolean) {
+function parseLocation(value: unknown): LocationContext | null {
+  if (!isRecord(value)) return null;
+
+  const latitude = value.latitude;
+  const longitude = value.longitude;
+  const accuracy = value.accuracy;
+
+  if (
+    typeof latitude !== "number" ||
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    typeof longitude !== "number" ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
+
+  return {
+    latitude,
+    longitude,
+    accuracy:
+      typeof accuracy === "number" && Number.isFinite(accuracy)
+        ? Math.max(0, Math.round(accuracy))
+        : null,
+  };
+}
+
+function buildUserMessage(message: string, location: LocationContext | null) {
+  if (!location) return message;
+
+  const accuracyText =
+    location.accuracy === null
+      ? ""
+      : ` Accuracy is approximately ${location.accuracy} meters.`;
+
+  return `${message}
+
+Approximate browser location context: latitude ${location.latitude}, longitude ${location.longitude}.${accuracyText}
+Use this only for broad recommendation context. Ask the user to confirm their delivery city before making delivery claims.`;
+}
+
+async function callGroq(
+  message: string,
+  isRetry: boolean,
+  location: LocationContext | null
+) {
   return fetch("https://api.groq.com/openai/v1/responses", {
     method: "POST",
     headers: {
@@ -906,7 +1030,7 @@ async function callGroq(message: string, isRetry: boolean) {
         },
         {
           role: "user",
-          content: message,
+          content: buildUserMessage(message, location),
         },
       ],
       tools: [
@@ -933,7 +1057,8 @@ async function callGroq(message: string, isRetry: boolean) {
 
 export async function POST(req: Request) {
   try {
-    const { message } = await req.json();
+    const { message, location: rawLocation } = await req.json();
+    const location = parseLocation(rawLocation);
 
     if (!message || typeof message !== "string") {
       return Response.json({ error: "Message is required" }, { status: 400 });
@@ -946,12 +1071,12 @@ export async function POST(req: Request) {
       );
     }
 
-    let groqResponse = await callGroq(message, false);
+    let groqResponse = await callGroq(message, false, location);
     let data = (await groqResponse.json()) as GroqResponse;
 
     if (!groqResponse.ok && data.error?.code === "tool_use_failed") {
       console.warn("Retrying Groq MCP call with stricter JSON typing...");
-      groqResponse = await callGroq(message, true);
+      groqResponse = await callGroq(message, true, location);
       data = (await groqResponse.json()) as GroqResponse;
     }
 
@@ -961,7 +1086,7 @@ export async function POST(req: Request) {
       return Response.json(
         {
           error:
-            "The shopping tool had trouble understanding that request. Try saying it like: Find birthday gifts under Rs. 8000 for mother in Kandy.",
+            "The shopping tool had trouble understanding that request. Try saying it like: Find wireless earbuds under Rs. 15000, or show weekly grocery essentials.",
           details: data.error?.message,
         },
         { status: groqResponse.status }

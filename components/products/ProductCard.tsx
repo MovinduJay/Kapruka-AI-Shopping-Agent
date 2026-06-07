@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { ExternalLink, ImageIcon, ShoppingCart } from "lucide-react";
 import type { ProductCard as ProductCardType } from "@/types/product";
 
@@ -7,30 +10,37 @@ type Props = {
 };
 
 export function ProductCard({ product, onAddToCart }: Props) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const imageUrl =
+    !imageFailed && (product.imageUrl || product.productUrl)
+      ? `/api/product-image?${new URLSearchParams({
+          ...(product.imageUrl ? { src: product.imageUrl } : {}),
+          ...(product.productUrl ? { product: product.productUrl } : {}),
+        }).toString()}`
+      : null;
+
   return (
-    <div className="group overflow-hidden rounded-3xl border border-white/10 bg-white/[0.06] shadow-xl transition hover:-translate-y-1 hover:bg-white/[0.09]">
-      <div className="relative flex h-40 items-center justify-center bg-gradient-to-br from-emerald-500/20 via-slate-800 to-slate-950">
-        {product.imageUrl ? (
+    <article className="group flex h-full flex-col overflow-hidden rounded-[30px] border border-white/[0.09] bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-2 shadow-[0_18px_45px_-24px_rgba(0,0,0,0.9)] transition duration-300 hover:-translate-y-1.5 hover:border-emerald-300/70 hover:shadow-[0_24px_58px_-20px_rgba(16,185,129,0.5)]">
+      <div className="relative aspect-square overflow-hidden rounded-[24px] border border-white/[0.06] bg-slate-900 shadow-inner">
+        {imageUrl ? (
           <img
-            src={product.imageUrl}
+            src={imageUrl}
             alt={product.name}
-            className="h-full w-full object-cover"
+            loading="lazy"
+            onError={() => setImageFailed(true)}
+            className="h-full w-full rounded-[23px] object-contain transition duration-500 group-hover:scale-[1.025]"
           />
         ) : (
-          <div className="flex flex-col items-center gap-2 text-slate-400">
+          <div className="flex h-full flex-col items-center justify-center gap-2 rounded-[23px] bg-gradient-to-br from-slate-800 to-slate-900 text-slate-400">
             <ImageIcon size={34} />
             <span className="text-xs">Image coming soon</span>
           </div>
         )}
-
-        <div className="absolute left-3 top-3 rounded-full bg-emerald-400 px-3 py-1 text-xs font-bold text-slate-950">
-          Match
-        </div>
       </div>
 
-      <div className="space-y-3 p-4">
+      <div className="flex flex-1 flex-col px-3.5 pb-3.5 pt-4">
         <div>
-          <h3 className="line-clamp-2 text-sm font-semibold text-white">
+          <h3 className="line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-white">
             {product.name}
           </h3>
 
@@ -39,14 +49,16 @@ export function ProductCard({ product, onAddToCart }: Props) {
           </p>
         </div>
 
-        <p className="line-clamp-2 text-xs leading-5 text-slate-400">
-          {product.reason || "Good match for your request."}
+        <p className="mt-3 line-clamp-2 min-h-10 text-xs leading-5 text-slate-400">
+          {product.description ||
+            product.reason ||
+            "Open the product to view full details."}
         </p>
 
-        <div className="flex gap-2">
+        <div className="mt-auto flex gap-2 pt-4">
           <button
             onClick={() => onAddToCart(product)}
-            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-400"
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-3 py-2.5 text-xs font-semibold text-white shadow-lg shadow-emerald-950/30 transition hover:bg-emerald-400"
           >
             <ShoppingCart size={14} />
             Add
@@ -57,13 +69,14 @@ export function ProductCard({ product, onAddToCart }: Props) {
               href={product.productUrl}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center justify-center rounded-xl border border-white/10 px-3 py-2 text-xs text-slate-300 hover:bg-white/10"
+              aria-label={`View ${product.name} on Kapruka`}
+              className="flex items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-xs text-slate-300 transition hover:bg-white/10 hover:text-white"
             >
               <ExternalLink size={14} />
             </a>
           )}
         </div>
       </div>
-    </div>
+    </article>
   );
 }
