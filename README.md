@@ -1,4 +1,16 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kapruka AI Shopping Agent
+
+## Demo Checkout Boundary
+
+The checkout demo ends after the user confirms the checkout details and the
+agent generates a Kapruka guest-checkout payment link.
+
+- Do not enter card details or attempt a test payment. Kapruka does not provide
+  a test credit card.
+- Generating the link does not confirm the order.
+- The returned checkout reference is not a trackable order number.
+- `kapruka_track_order` is relevant only after a real payment is completed and
+  Kapruka issues the actual order number.
 
 ## Getting Started
 

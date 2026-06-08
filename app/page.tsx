@@ -170,6 +170,10 @@ export default function Home() {
         body: JSON.stringify({
           message: userMessage,
           location: sharedLocation,
+          history: messages.slice(-8).map(({ role, content }) => ({
+            role,
+            content,
+          })),
         }),
       });
 
@@ -182,7 +186,7 @@ export default function Home() {
           content:
             data.reply ||
             data.error ||
-            "Sorry, I could not find a good response.",
+            "I lost the thread for a second. Send that again and I'll pick it up.",
           products: data.products || [],
         },
       ]);
@@ -191,7 +195,8 @@ export default function Home() {
         ...prev,
         {
           role: "assistant",
-          content: "Something went wrong. Please try again.",
+          content:
+            "That connection dropped on me. Try once more and I'll get back to the shortlist.",
         },
       ]);
     } finally {
@@ -333,6 +338,7 @@ export default function Home() {
                     message.products.length > 0 && (
                       <ProductCarousel
                         products={message.products}
+                        cartProductIds={cart.map((item) => item.id)}
                         onAddToCart={addToCart}
                       />
                     )}
@@ -385,7 +391,7 @@ export default function Home() {
                   }
                 }}
                 placeholder="Search products, compare options, or describe what you need"
-                className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none placeholder:text-slate-500"
+                className="min-w-0 flex-1 bg-transparent px-3 text-md outline-none placeholder:text-slate-500"
               />
 
               <button

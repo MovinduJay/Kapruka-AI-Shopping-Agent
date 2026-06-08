@@ -174,10 +174,12 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
               Explicit checkout
             </div>
             <h2 id="checkout-title" className="text-2xl font-bold">
-              {step === "pay" ? "Payment link ready" : "Review before payment"}
+              {step === "pay"
+                ? "Demo checkout complete"
+                : "Review checkout details"}
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-400">
-              No order is created until you click Create checkout link.
+              The order is not confirmed unless the checkout link is paid.
             </p>
           </div>
 
@@ -365,8 +367,8 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
               <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-5">
                 <h3 className="font-semibold text-white">Final check</h3>
                 <p className="mt-2 text-sm leading-6 text-slate-400">
-                  This is still only a review. Kapruka order creation happens
-                  only after the button below is clicked.
+                  Create the Kapruka guest-checkout link only after the user
+                  confirms these details.
                 </p>
               </div>
 
@@ -464,7 +466,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                       Checkout link created
                     </h3>
                     <p className="mt-1 text-sm text-slate-300">
-                      Reference: {result.order_ref}
+                      Checkout reference: {result.order_ref}
                     </p>
                   </div>
                 </div>
@@ -499,8 +501,10 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
               </a>
 
               <p className="text-xs leading-5 text-slate-400">
-                Complete payment in Kapruka. After payment, Kapruka will send
-                the actual order number by email.
+                This is the end of the demo flow. Do not enter card details.
+                This checkout reference is not a confirmed order number and
+                cannot be used for order tracking. Kapruka provides the actual
+                order number only after a real payment.
               </p>
             </div>
           )}

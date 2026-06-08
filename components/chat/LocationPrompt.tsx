@@ -64,29 +64,29 @@ export function LocationPrompt({
   }
 
   return (
-    <div className="relative w-full max-w-3xl rounded-3xl border border-white/10 bg-slate-900 p-4 shadow-xl">
+    <div className="relative w-full max-w-3xl rounded-lg border border-white/10 bg-slate-900 p-3 shadow-xl sm:p-4">
       <button
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss location suggestion"
-        className="absolute right-3 top-3 rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-500/25 hover:text-white"
+        className="absolute right-1.5 top-1.5 rounded-md p-1.5 text-slate-500 transition hover:bg-slate-500/25 hover:text-white sm:right-3 sm:top-3"
       >
         <X size={16} />
       </button>
 
-      <div className="flex flex-col gap-4 pr-8 sm:flex-row sm:items-center">
-        <div className="flex min-w-0 flex-1 items-center gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] text-slate-300">
-            <MapPin size={21} />
+      <div className="flex items-center gap-2 pr-7 sm:gap-4 sm:pr-8">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-4">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-white/10 bg-white/[0.05] text-slate-300 sm:h-12 sm:w-12 sm:rounded-lg">
+            <MapPin size={19} />
           </div>
 
           <div className="min-w-0">
-            <h2 className="font-semibold text-white">
+            <h2 className="truncate text-sm font-semibold text-white sm:text-base">
               {location
                 ? "Location shared"
-                : "Share your location for better results"}
+                : "Use your location"}
             </h2>
-            <p className="mt-1 text-sm leading-5 text-slate-400">
+            <p className="mt-1 hidden text-sm leading-5 text-slate-400 sm:block">
               {location
                 ? "Future recommendations can use your approximate area. Confirm the delivery city before checkout."
                 : "Get recommendations based on your approximate area. We only ask when you choose to share."}
@@ -95,7 +95,7 @@ export function LocationPrompt({
         </div>
 
         {location ? (
-          <div className="flex shrink-0 items-center gap-2 rounded-xl bg-emerald-500/15 px-4 py-2.5 text-sm font-semibold text-emerald-300">
+          <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 text-xs font-semibold text-emerald-300 sm:h-auto sm:px-4 sm:py-2.5 sm:text-sm">
             <Check size={17} />
             Shared
           </div>
@@ -104,18 +104,18 @@ export function LocationPrompt({
             type="button"
             onClick={shareLocation}
             disabled={status === "loading"}
-            className="flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-100 px-5 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-white disabled:cursor-wait disabled:opacity-70"
+            className="flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-md bg-slate-100 px-3 text-xs font-semibold text-slate-950 transition hover:bg-white disabled:cursor-wait disabled:opacity-70 sm:h-auto sm:px-5 sm:py-2.5 sm:text-sm"
           >
             {status === "loading" && (
               <LoaderCircle size={17} className="animate-spin" />
             )}
-            {status === "loading" ? "Locating..." : "Share location"}
+            {status === "loading" ? "Locating..." : "Use location"}
           </button>
         )}
       </div>
 
       {error && (
-        <p role="alert" className="mt-3 text-sm text-amber-200">
+        <p role="alert" className="mt-2 text-xs text-amber-200 sm:mt-3 sm:text-sm">
           {error}
         </p>
       )}

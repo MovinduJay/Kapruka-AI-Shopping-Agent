@@ -1,5 +1,6 @@
 const ALLOWED_IMAGE_HOSTS = new Set([
   "static2.kapruka.com",
+  "partnercentral.kapruka.com",
   "www.kapruka.com",
   "kapruka.com",
 ]);

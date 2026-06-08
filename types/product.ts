@@ -3,9 +3,18 @@ export type ProductCard = {
   name: string;
   price: number | null;
   currency: "LKR";
+  compareAtPrice?: number | null;
   imageUrl?: string | null;
   productUrl?: string | null;
   inStock?: boolean | null;
+  stockLevel?: "low" | "medium" | "high" | null;
   description?: string | null;
   reason?: string;
+  rating?: number | null;
+  reviewCount?: number | null;
+  brand?: string | null;
+  category?: string | null;
+  shipsInternationally?: boolean | null;
+  freeShipping?: boolean | null;
+  priceValidUntil?: string | null;
 };

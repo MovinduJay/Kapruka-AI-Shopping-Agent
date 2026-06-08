@@ -7,22 +7,28 @@ import type { ProductCard as ProductCardType } from "@/types/product";
 
 type Props = {
   products: ProductCardType[];
+  cartProductIds: string[];
   onAddToCart: (product: ProductCardType) => void;
 };
 
-export function ProductCarousel({ products, onAddToCart }: Props) {
+export function ProductCarousel({
+  products,
+  cartProductIds,
+  onAddToCart,
+}: Props) {
   const carouselRef = useRef<HTMLDivElement>(null);
 
   function scroll(direction: "left" | "right") {
     const carousel = carouselRef.current;
+    const firstCard = carousel?.firstElementChild;
 
-    if (!carousel) return;
+    if (!carousel || !(firstCard instanceof HTMLElement)) return;
+
+    const gap = Number.parseFloat(getComputedStyle(carousel).columnGap) || 0;
+    const cardStep = firstCard.getBoundingClientRect().width + gap;
 
     carousel.scrollBy({
-      left:
-        direction === "left"
-          ? -carousel.clientWidth
-          : carousel.clientWidth,
+      left: direction === "left" ? -cardStep : cardStep,
       behavior: "smooth",
     });
   }
@@ -60,7 +66,11 @@ export function ProductCarousel({ products, onAddToCart }: Props) {
             key={product.id}
             className="w-[82%] shrink-0 snap-start sm:w-[calc((100%_-_1rem)/2)] lg:w-[calc((100%_-_2rem)/3)] xl:w-[calc((100%_-_3rem)/4)]"
           >
-            <ProductCard product={product} onAddToCart={onAddToCart} />
+            <ProductCard
+              product={product}
+              isInCart={cartProductIds.includes(product.id)}
+              onAddToCart={onAddToCart}
+            />
           </div>
         ))}
       </div>

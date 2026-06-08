@@ -31,19 +31,47 @@ type LocationContext = {
   accuracy: number | null;
 };
 
+type ChatHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 type ProductLike = {
   id: string;
   name: string;
   price: number | null;
   currency: "LKR";
+  compareAtPrice?: number | null;
   imageUrl?: string | null;
   productUrl?: string | null;
   inStock?: boolean | null;
+  stockLevel?: "low" | "medium" | "high" | null;
   description?: string | null;
   reason?: string;
+  rating?: number | null;
+  reviewCount?: number | null;
+  brand?: string | null;
+  category?: string | null;
+  shipsInternationally?: boolean | null;
+  freeShipping?: boolean | null;
+  priceValidUntil?: string | null;
 };
 
-const productImageCache = new Map<string, string | null>();
+type ProductPageMetadata = Pick<
+  ProductLike,
+  | "imageUrl"
+  | "price"
+  | "inStock"
+  | "description"
+  | "rating"
+  | "reviewCount"
+  | "brand"
+  | "category"
+  | "freeShipping"
+  | "priceValidUntil"
+>;
+
+const productMetadataCache = new Map<string, ProductPageMetadata | null>();
 
 function isRecord(value: unknown): value is AnyRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -67,7 +95,7 @@ function extractText(response: GroqResponse): string {
     }
   }
 
-  return "Sorry, I could not generate a response.";
+  return "I couldn't pull together a useful answer that time. Try me once more.";
 }
 
 function cleanProductName(name: string) {
@@ -196,6 +224,45 @@ function pickBoolean(obj: AnyRecord, keys: string[]) {
     if (typeof value === "string") {
       if (value.toLowerCase() === "true") return true;
       if (value.toLowerCase() === "false") return false;
+    }
+  }
+
+  return null;
+}
+
+function pickStockLevel(obj: AnyRecord) {
+  const value = pickString(obj, ["stock_level", "stockLevel"]);
+
+  return value === "low" || value === "medium" || value === "high"
+    ? value
+    : null;
+}
+
+function pickCategoryName(obj: AnyRecord) {
+  const category = obj.category;
+
+  if (typeof category === "string" && category.trim()) {
+    return category.trim();
+  }
+
+  if (isRecord(category)) {
+    return pickString(category, ["name", "title", "slug"]);
+  }
+
+  return null;
+}
+
+function pickBrandName(obj: AnyRecord) {
+  const direct = pickString(obj, ["brand", "vendor", "manufacturer"]);
+
+  if (direct) return direct;
+
+  for (const key of ["brand", "vendor", "manufacturer", "attributes"]) {
+    const value = obj[key];
+
+    if (isRecord(value)) {
+      const nested = pickString(value, ["name", "brand", "vendor"]);
+      if (nested) return nested;
     }
   }
 
@@ -400,6 +467,32 @@ function productFromObject(obj: AnyRecord, index: number): ProductLike | null {
     "isAvailable",
     "stock",
   ]);
+  const stockLevel = pickStockLevel(obj);
+  const compareAtPrice = pickNumber(obj, [
+    "compare_at_price",
+    "compareAtPrice",
+    "original_price",
+    "originalPrice",
+    "list_price",
+    "listPrice",
+  ]);
+  const rating = pickNumber(obj, [
+    "rating",
+    "rating_value",
+    "ratingValue",
+    "average_rating",
+    "averageRating",
+  ]);
+  const reviewCount = pickNumber(obj, [
+    "review_count",
+    "reviewCount",
+    "reviews_count",
+    "ratings_count",
+  ]);
+  const shipsInternationally = pickBoolean(obj, [
+    "ships_internationally",
+    "shipsInternationally",
+  ]);
 
   return {
     id: String(rawId),
@@ -409,7 +502,14 @@ function productFromObject(obj: AnyRecord, index: number): ProductLike | null {
     imageUrl,
     productUrl,
     inStock,
+    stockLevel,
+    compareAtPrice,
     description,
+    rating,
+    reviewCount,
+    brand: pickBrandName(obj),
+    category: pickCategoryName(obj),
+    shipsInternationally,
   };
 }
 
@@ -703,8 +803,17 @@ function extractProductsFromMcpResponse(response: GroqResponse) {
       imageUrl: existing.imageUrl || product.imageUrl,
       productUrl: existing.productUrl || product.productUrl,
       price: existing.price ?? product.price,
+      compareAtPrice: existing.compareAtPrice ?? product.compareAtPrice,
       description: existing.description || product.description,
       reason: existing.reason || product.reason,
+      inStock: existing.inStock ?? product.inStock,
+      stockLevel: existing.stockLevel || product.stockLevel,
+      rating: existing.rating ?? product.rating,
+      reviewCount: existing.reviewCount ?? product.reviewCount,
+      brand: existing.brand || product.brand,
+      category: existing.category || product.category,
+      shipsInternationally:
+        existing.shipsInternationally ?? product.shipsInternationally,
     });
   }
 
@@ -712,27 +821,89 @@ function extractProductsFromMcpResponse(response: GroqResponse) {
 }
 
 function mergeProducts(mcpProducts: ProductLike[], textProducts: ProductLike[]) {
-  const unique = new Map<string, ProductLike>();
+  const unique: ProductLike[] = [];
+
+  function normalizeProductName(name: string) {
+    return name
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/\b(?:the|a|an)\b/g, " ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function namesLikelyMatch(firstName: string, secondName: string) {
+    const first = normalizeProductName(firstName);
+    const second = normalizeProductName(secondName);
+
+    if (first === second) return true;
+
+    if (
+      Math.min(first.length, second.length) >= 20 &&
+      (first.startsWith(second) || second.startsWith(first))
+    ) {
+      return true;
+    }
+
+    const firstTokens = new Set(first.split(" ").filter(Boolean));
+    const secondTokens = new Set(second.split(" ").filter(Boolean));
+    const sharedTokens = [...firstTokens].filter((token) =>
+      secondTokens.has(token)
+    ).length;
+    const tokenBase = Math.min(firstTokens.size, secondTokens.size);
+
+    return tokenBase >= 4 && sharedTokens / tokenBase >= 0.8;
+  }
+
+  function productsLikelyMatch(first: ProductLike, second: ProductLike) {
+    if (
+      first.productUrl &&
+      second.productUrl &&
+      first.productUrl === second.productUrl
+    ) {
+      return true;
+    }
+
+    if (
+      looksLikeKaprukaProductId(first.id) &&
+      looksLikeKaprukaProductId(second.id) &&
+      first.id.toLowerCase() === second.id.toLowerCase()
+    ) {
+      return true;
+    }
+
+    const pricesMatch =
+      first.price === null ||
+      second.price === null ||
+      first.price === second.price;
+    const hasIncompleteRecord =
+      (!first.productUrl && !first.imageUrl) ||
+      (!second.productUrl && !second.imageUrl);
+
+    return (
+      hasIncompleteRecord &&
+      pricesMatch &&
+      namesLikelyMatch(first.name, second.name)
+    );
+  }
 
   for (const product of [...mcpProducts, ...textProducts]) {
-    const key = product.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim();
+    const existingIndex = unique.findIndex((existing) =>
+      productsLikelyMatch(existing, product)
+    );
 
-    if (!unique.has(key)) {
-      unique.set(key, product);
+    if (existingIndex === -1) {
+      unique.push(product);
       continue;
     }
 
-    const existing = unique.get(key);
-
-    if (!existing) continue;
+    const existing = unique[existingIndex];
 
     const existingLooksOrderable = looksLikeKaprukaProductId(existing.id);
     const productLooksOrderable = looksLikeKaprukaProductId(product.id);
 
-    unique.set(key, {
+    unique[existingIndex] = {
       ...existing,
       ...product,
       id:
@@ -742,12 +913,21 @@ function mergeProducts(mcpProducts: ProductLike[], textProducts: ProductLike[]) 
       imageUrl: existing.imageUrl || product.imageUrl,
       productUrl: existing.productUrl || product.productUrl,
       price: existing.price ?? product.price,
+      compareAtPrice: existing.compareAtPrice ?? product.compareAtPrice,
       description: existing.description || product.description,
       reason: existing.reason || product.reason,
-    });
+      inStock: existing.inStock ?? product.inStock,
+      stockLevel: existing.stockLevel || product.stockLevel,
+      rating: existing.rating ?? product.rating,
+      reviewCount: existing.reviewCount ?? product.reviewCount,
+      brand: existing.brand || product.brand,
+      category: existing.category || product.category,
+      shipsInternationally:
+        existing.shipsInternationally ?? product.shipsInternationally,
+    };
   }
 
-  return Array.from(unique.values()).slice(0, 8);
+  return unique.slice(0, 8);
 }
 
 function looksLikeKaprukaProductId(id: string) {
@@ -756,9 +936,99 @@ function looksLikeKaprukaProductId(id: string) {
   );
 }
 
-async function getImageFromProductPage(productUrl: string) {
-  if (productImageCache.has(productUrl)) {
-    return productImageCache.get(productUrl) || null;
+function hasJsonLdType(value: unknown, expectedType: string) {
+  if (typeof value === "string") return value === expectedType;
+  return Array.isArray(value) && value.includes(expectedType);
+}
+
+function collectJsonLdObjects(value: unknown, output: AnyRecord[] = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectJsonLdObjects(item, output);
+    return output;
+  }
+
+  if (!isRecord(value)) return output;
+
+  output.push(value);
+
+  if (Array.isArray(value["@graph"])) {
+    collectJsonLdObjects(value["@graph"], output);
+  }
+
+  return output;
+}
+
+function parseProductJsonLd(html: string) {
+  const scriptRegex =
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+
+  for (const match of html.matchAll(scriptRegex)) {
+    const parsed = parsePossibleJson(match[1].trim());
+
+    if (!parsed) continue;
+
+    const product = collectJsonLdObjects(parsed).find((item) =>
+      hasJsonLdType(item["@type"], "Product")
+    );
+
+    if (product) return product;
+  }
+
+  return null;
+}
+
+function metadataFromProductJsonLd(product: AnyRecord): ProductPageMetadata {
+  const offersValue = Array.isArray(product.offers)
+    ? product.offers[0]
+    : product.offers;
+  const offers = isRecord(offersValue) ? offersValue : null;
+  const aggregateRating = isRecord(product.aggregateRating)
+    ? product.aggregateRating
+    : null;
+  const shippingDetailsValue = offers?.shippingDetails;
+  const shippingDetails = Array.isArray(shippingDetailsValue)
+    ? shippingDetailsValue[0]
+    : shippingDetailsValue;
+  const shippingRate = isRecord(shippingDetails)
+    ? shippingDetails.shippingRate
+    : null;
+  const shippingAmount = isRecord(shippingRate)
+    ? pickNumber(shippingRate, ["value", "amount"])
+    : null;
+  const availability = offers
+    ? pickString(offers, ["availability"])?.toLowerCase()
+    : null;
+  const rawImage = Array.isArray(product.image)
+    ? product.image.find((image) => typeof image === "string")
+    : product.image;
+
+  return {
+    imageUrl:
+      typeof rawImage === "string" ? normalizeUrl(rawImage) : null,
+    price: offers ? pickNumber(offers, ["price"]) : null,
+    inStock: availability
+      ? availability.includes("instock")
+      : null,
+    description:
+      pickString(product, ["description"])?.slice(0, 500) || null,
+    rating: aggregateRating
+      ? pickNumber(aggregateRating, ["ratingValue", "rating_value"])
+      : null,
+    reviewCount: aggregateRating
+      ? pickNumber(aggregateRating, ["reviewCount", "ratingCount"])
+      : null,
+    brand: pickBrandName(product),
+    category: pickCategoryName(product),
+    freeShipping: shippingAmount === null ? null : shippingAmount === 0,
+    priceValidUntil: offers
+      ? pickString(offers, ["priceValidUntil"])
+      : null,
+  };
+}
+
+async function getMetadataFromProductPage(productUrl: string) {
+  if (productMetadataCache.has(productUrl)) {
+    return productMetadataCache.get(productUrl) || null;
   }
 
   try {
@@ -766,14 +1036,16 @@ async function getImageFromProductPage(productUrl: string) {
       headers: {
         "User-Agent": "Mozilla/5.0 KaprukaAIConcierge/1.0",
       },
+      signal: AbortSignal.timeout(8_000),
     });
 
     if (!response.ok) {
-      productImageCache.set(productUrl, null);
+      productMetadataCache.set(productUrl, null);
       return null;
     }
 
     const html = await response.text();
+    const jsonLdProduct = parseProductJsonLd(html);
 
     const imageMatch =
       html.match(
@@ -790,29 +1062,56 @@ async function getImageFromProductPage(productUrl: string) {
       );
 
     const imageUrl = normalizeUrl(imageMatch?.[1]);
+    const metadata = jsonLdProduct
+      ? metadataFromProductJsonLd(jsonLdProduct)
+      : {
+          imageUrl,
+          price: null,
+          inStock: null,
+          description: null,
+          rating: null,
+          reviewCount: null,
+          brand: null,
+          category: null,
+          freeShipping: null,
+          priceValidUntil: null,
+        };
 
-    productImageCache.set(productUrl, imageUrl);
+    metadata.imageUrl ||= imageUrl;
+    productMetadataCache.set(productUrl, metadata);
 
-    return imageUrl;
+    return metadata;
   } catch (error) {
-    console.warn("Could not fetch product image:", productUrl, error);
-    productImageCache.set(productUrl, null);
+    console.warn("Could not fetch product metadata:", productUrl, error);
+    productMetadataCache.set(productUrl, null);
     return null;
   }
 }
 
-async function enrichProductsWithImages(products: ProductLike[]) {
+async function enrichProductsWithMetadata(products: ProductLike[]) {
   return Promise.all(
     products.map(async (product) => {
-      if (product.imageUrl || !product.productUrl) {
+      if (!product.productUrl) {
         return product;
       }
 
-      const imageUrl = await getImageFromProductPage(product.productUrl);
+      const metadata = await getMetadataFromProductPage(product.productUrl);
+
+      if (!metadata) return product;
 
       return {
         ...product,
-        imageUrl,
+        imageUrl: product.imageUrl || metadata.imageUrl,
+        price: product.price ?? metadata.price,
+        inStock: product.inStock ?? metadata.inStock,
+        description: product.description || metadata.description,
+        rating: product.rating ?? metadata.rating,
+        reviewCount: product.reviewCount ?? metadata.reviewCount,
+        brand: product.brand || metadata.brand,
+        category: product.category || metadata.category,
+        freeShipping: product.freeShipping ?? metadata.freeShipping,
+        priceValidUntil:
+          product.priceValidUntil || metadata.priceValidUntil,
       };
     })
   );
@@ -867,27 +1166,34 @@ Core customer model:
 - When seller, brand, size, compatibility, quantity, specifications, or delivery details affect the decision, surface those factors or ask one focused question.
 
 Personality and voice:
-- You are not a generic chatbot. You are a capable, practical Sri Lankan shopping guide.
-- Sound warm, confident, helpful, and slightly witty.
-- Give honest opinions. Do not list products neutrally only.
-- Use short, human sentences.
-- Make the user feel guided, not lectured.
+- You are Kapruka Scout: a sharp, modern Sri Lankan shopping companion, not a customer-support script.
+- Sound warm, relaxed, confident, and observant. Write like a switched-on friend who is genuinely good at shopping.
+- Use current, natural language such as "solid pick", "worth it", "skip this one", or "my pick" when it fits. Never force slang.
+- Be lightly witty, never loud, childish, overexcited, or try-hard. Do not call the user "bestie", "bro", or "queen" unless they establish that tone first.
+- Give a point of view. Lead with the verdict, then the reason. Say which option you would choose and what tradeoff the user is making.
+- Use short, conversational sentences and contractions. Most replies should have 2 to 4 sentences before any product cards.
+- Notice and reuse details from the recent conversation: budget, recipient, occasion, city, date, style, brand, size, and dislikes. Do not ask for information the user already gave.
+- When the user is unsure, reduce the decision to one easy choice instead of returning a questionnaire.
+- Match the user's energy. Keep quick questions quick; become more detailed only when the decision needs it.
 - Avoid cheesy lines like "gifts from the heart are precious" or "choose what resonates".
 - Avoid corporate phrases like "memorable birthday celebration", "delightful experience", "perfect choice", unless truly natural.
+- Avoid service-desk phrases like "How may I assist you?", "Please provide", and "I apologize for the inconvenience".
+- Do not open every reply with "Sure", "Certainly", "Of course", or the user's name.
+- Use at most one emoji in a reply, and only when it adds tone.
 - Do not end with generic inspirational advice.
 - End with a useful next action, like asking which item to add to cart, whether to check delivery, or whether they want a more premium/budget option.
 
 Good English style:
-"These earbuds fit your Rs. 15,000 budget. I would prioritize battery life and warranty over flashy extras; the first two are the strongest everyday options."
+"Okay, these are the ones worth looking at. My pick is the first pair: better battery life, still under your Rs. 15,000 cap, and no paying extra for features you probably won't use."
 
 Bad English style:
-"Remember, gifts that come from the heart are always the most precious."
+"Certainly! I have found several wonderful products that may suit your requirements. Please review the options below."
 
 Good Singlish style:
-"Hari, daily use ekata nam battery life saha warranty eka balala options compare karamu. Budget eka kiyanna."
+"Hari, daily use ekata nam first eka thamai solid pick. Battery life hodai, budget ekath athule - delivery check karannada?"
 
 Bad Singlish style:
-"Hadawathin dena thagga thamai watinma thagga."
+"Obata awashya bhanda thoraganeemata mama sahaya wannam."
 
 Language matching rules:
 - Detect the user's language style.
@@ -913,6 +1219,11 @@ Shopping rules:
 - If user gives city/date, check delivery when possible.
 - If important details are missing, ask one short follow-up question.
 - Do not create an order. Checkout will be handled later after explicit user confirmation.
+- For the demo, checkout ends when the guest-checkout payment link is generated. Never ask for card details, suggest test card data, or claim that payment was completed.
+- For order tracking, ask for the actual order number from the paid-order confirmation email or order-complete page, then use kapruka_track_order.
+- Never call kapruka_track_order with placeholders such as "unknown", "none", or an invented number. Call it only when the user has supplied a plausible order number.
+- The pre-payment checkout reference is not a trackable order number. If that is all the user has, explain the difference warmly and in one or two sentences.
+- When reporting tracking results, lead with the current status and next expected step. Do not unnecessarily repeat the recipient's full phone number or street address.
 - Browser coordinates are approximate context only. Do not claim an exact city, address, delivery fee, or delivery availability from coordinates.
 - If delivery location matters and the user has not named a city, ask them to confirm their delivery city.
 
@@ -1026,7 +1337,8 @@ Use this only for broad recommendation context. Ask the user to confirm their de
 async function callGroq(
   message: string,
   isRetry: boolean,
-  location: LocationContext | null
+  location: LocationContext | null,
+  history: ChatHistoryMessage[]
 ) {
   return fetch("https://api.groq.com/openai/v1/responses", {
     method: "POST",
@@ -1042,6 +1354,7 @@ async function callGroq(
           role: "system",
           content: buildSystemPrompt(isRetry),
         },
+        ...history,
         {
           role: "user",
           content: buildUserMessage(message, location),
@@ -1054,7 +1367,7 @@ async function callGroq(
           server_url:
             process.env.KAPRUKA_MCP_URL || "https://mcp.kapruka.com/mcp",
           server_description:
-            "Kapruka Sri Lanka shopping tools for product search, product details, categories, delivery cities, delivery checks, guest checkout, and order tracking.",
+            "Kapruka Sri Lanka shopping tools for product search, product details, categories, delivery cities, delivery checks, and tracking existing paid orders.",
           require_approval: "never",
           allowed_tools: [
             "kapruka_search_products",
@@ -1062,6 +1375,7 @@ async function callGroq(
             "kapruka_list_categories",
             "kapruka_list_delivery_cities",
             "kapruka_check_delivery",
+            "kapruka_track_order",
           ],
         },
       ],
@@ -1081,10 +1395,48 @@ function isPlainGreeting(message: string) {
   );
 }
 
+function isOrderTrackingRequest(message: string) {
+  return /\b(?:track|tracking|status|where)\b[\s\S]{0,30}\b(?:order|delivery|package)\b|\b(?:order|delivery|package)\b[\s\S]{0,30}\b(?:track|tracking|status|where)\b/i.test(
+    message
+  );
+}
+
+function hasPlausibleOrderNumber(message: string) {
+  return message
+    .toUpperCase()
+    .split(/[^A-Z0-9]+/)
+    .some(
+      (token) =>
+        token.length >= 8 &&
+        token.length <= 24 &&
+        /[A-Z]/.test(token) &&
+        /\d/.test(token)
+    );
+}
+
 export async function POST(req: Request) {
   try {
-    const { message, location: rawLocation } = await req.json();
+    const {
+      message,
+      location: rawLocation,
+      history: rawHistory,
+    } = await req.json();
     const location = parseLocation(rawLocation);
+    const history: ChatHistoryMessage[] = Array.isArray(rawHistory)
+      ? rawHistory
+          .filter(
+            (item): item is ChatHistoryMessage =>
+              isRecord(item) &&
+              (item.role === "user" || item.role === "assistant") &&
+              typeof item.content === "string" &&
+              item.content.trim().length > 0
+          )
+          .slice(-8)
+          .map((item) => ({
+            role: item.role,
+            content: item.content.trim().slice(0, 2000),
+          }))
+      : [];
 
     if (!message || typeof message !== "string") {
       return Response.json({ error: "Message is required" }, { status: 400 });
@@ -1093,7 +1445,16 @@ export async function POST(req: Request) {
     if (isPlainGreeting(message)) {
       return Response.json({
         reply:
-          "Hi. Tell me what you want to shop for, or what problem you’re trying to solve. I can help with products, prices, delivery, and comparisons.",
+          "Hey! What are we hunting for today? Drop me the item, budget, or occasion and I'll narrow down the good stuff.",
+        products: [],
+        debug: [],
+      });
+    }
+
+    if (isOrderTrackingRequest(message) && !hasPlausibleOrderNumber(message)) {
+      return Response.json({
+        reply:
+          "Yep, I can check it. Send me the actual order number from your confirmation email or order-complete page - not the checkout reference - and I'll pull up the latest status.",
         products: [],
         debug: [],
       });
@@ -1106,12 +1467,12 @@ export async function POST(req: Request) {
       );
     }
 
-    let groqResponse = await callGroq(message, false, location);
+    let groqResponse = await callGroq(message, false, location, history);
     let data = (await groqResponse.json()) as GroqResponse;
 
     if (!groqResponse.ok && data.error?.code === "tool_use_failed") {
       console.warn("Retrying Groq MCP call with stricter JSON typing...");
-      groqResponse = await callGroq(message, true, location);
+      groqResponse = await callGroq(message, true, location, history);
       data = (await groqResponse.json()) as GroqResponse;
     }
 
@@ -1121,7 +1482,7 @@ export async function POST(req: Request) {
       return Response.json(
         {
           error:
-            "The shopping tool had trouble understanding that request. Try saying it like: Find wireless earbuds under Rs. 15000, or show weekly grocery essentials.",
+            "That search got a little messy. Try a quick version like \"earbuds under Rs. 15,000\" and I'll take it from there.",
           details: data.error?.message,
         },
         { status: groqResponse.status }
@@ -1134,7 +1495,7 @@ export async function POST(req: Request) {
     const productsFromText = extractProductsFromReply(reply);
 
     const mergedProducts = mergeProducts(productsFromMcp, productsFromText);
-    const products = await enrichProductsWithImages(mergedProducts);
+    const products = await enrichProductsWithMetadata(mergedProducts);
 
     const displayReply = cleanReplyForUi(reply, products.length);
 
@@ -1143,6 +1504,8 @@ export async function POST(req: Request) {
       products.map((product) => ({
         name: product.name,
         price: product.price,
+        rating: product.rating,
+        reviewCount: product.reviewCount,
         imageUrl: product.imageUrl,
         productUrl: product.productUrl,
       }))
@@ -1158,7 +1521,8 @@ export async function POST(req: Request) {
 
     return Response.json(
       {
-        error: "Something went wrong while talking to Kapruka AI Concierge.",
+        error:
+          "I hit a connection issue while checking Kapruka. Send that once more and I'll retry it.",
       },
       { status: 500 }
     );
