@@ -6,7 +6,6 @@ import {
   ExternalLink,
   ImageIcon,
   ShoppingCart,
-  Star,
 } from "lucide-react";
 import type { ProductCard as ProductCardType } from "@/types/product";
 
@@ -22,8 +21,8 @@ function formatPrice(price: number) {
   }).format(price);
 }
 
-function ratingStars(rating: number) {
-  return Array.from({ length: 5 }, (_, index) => index < Math.round(rating));
+function ratingStarFill(rating: number, index: number) {
+  return Math.max(0, Math.min(1, rating - index)) * 100;
 }
 
 export function ProductCard({ product, isInCart, onAddToCart }: Props) {
@@ -106,17 +105,26 @@ export function ProductCard({ product, isInCart, onAddToCart }: Props) {
               }`}
             >
               <span className="flex items-center gap-0.5" aria-hidden="true">
-                {ratingStars(product.rating).map((filled, index) => (
-                  <Star
-                    key={index}
-                    size={15}
-                    className={
-                      filled
-                        ? "fill-amber-400 text-amber-400"
-                        : "text-slate-600"
-                    }
-                  />
-                ))}
+                {Array.from({ length: 5 }, (_, index) => {
+                  const fill = ratingStarFill(product.rating!, index);
+
+                  return (
+                    <span
+                      key={index}
+                      className="relative inline-block h-4 w-4 text-base leading-4"
+                    >
+                      <span className="absolute inset-0 text-slate-600">
+                        ★
+                      </span>
+                      <span
+                        className="absolute inset-0 overflow-hidden"
+                        style={{ width: `${fill}%` }}
+                      >
+                        <span className="text-amber-400">★</span>
+                      </span>
+                    </span>
+                  );
+                })}
               </span>
               <span className="font-semibold text-slate-200">
                 {product.rating.toFixed(1)}
