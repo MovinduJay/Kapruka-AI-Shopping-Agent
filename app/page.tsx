@@ -59,6 +59,13 @@ function saveTheme(theme: Theme) {
   window.dispatchEvent(new Event("kapruka-theme-change"));
 }
 
+function splitAssistantContent(content: string) {
+  return content
+    .split(/\n+|(?<=[.!?])\s+(?=[\p{Lu}\p{Lt}\p{Lo}"'(])/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -297,15 +304,24 @@ export default function Home() {
                       : "group/message max-w-5xl"
                   }
                 >
-                  <div
-                    className={`w-fit max-w-2xl whitespace-pre-wrap px-5 py-3 text-lg leading-7 shadow-sm ${
-                      message.role === "user"
-                        ? "ml-auto rounded-[28px] rounded-br-md bg-emerald-500 text-white"
-                        : "rounded-[28px] rounded-bl-md border border-white/[0.06] bg-slate-800 text-slate-100"
-                    }`}
-                  >
-                    {message.content}
-                  </div>
+                  {message.role === "assistant" ? (
+                    <div className="space-y-2">
+                      {splitAssistantContent(message.content).map(
+                        (part, partIndex) => (
+                          <div
+                            key={`${index}-${partIndex}`}
+                            className="w-fit max-w-2xl whitespace-pre-wrap rounded-[28px] rounded-bl-md border border-white/[0.06] bg-slate-800 px-5 py-3 text-lg leading-7 text-slate-100 shadow-sm"
+                          >
+                            {part}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  ) : (
+                    <div className="ml-auto w-fit max-w-2xl whitespace-pre-wrap rounded-[28px] rounded-br-md bg-emerald-500 px-5 py-3 text-lg leading-7 text-white shadow-sm">
+                      {message.content}
+                    </div>
+                  )}
 
                   <div
                     className={`pointer-events-none mt-1 flex h-7 gap-1.5 opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 ${
