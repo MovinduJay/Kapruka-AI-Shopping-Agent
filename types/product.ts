@@ -17,4 +17,25 @@ export type ProductCard = {
   shipsInternationally?: boolean | null;
   freeShipping?: boolean | null;
   priceValidUntil?: string | null;
+  agentScore?: number;
+  rankingReason?: string;
+};
+
+export type ProductQuestion = {
+  question: string;
+  answer: string;
+};
+
+export type ProductSpecification = {
+  label: string;
+  value: string;
+};
+
+export type ProductDetails = {
+  name: string | null;
+  description: string | null;
+  images: string[];
+  highlights: string[];
+  specifications: ProductSpecification[];
+  questions: ProductQuestion[];
 };

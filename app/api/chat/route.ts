@@ -1,3 +1,12 @@
+import type {
+  AgentMemory,
+  AgentState,
+  AgentStep,
+  AgentStepStatus,
+  AgentToolCall,
+  ProductRankingSignal,
+} from "@/types/agent";
+
 type GroqOutputContent = {
   type?: string;
   text?: string;
@@ -55,6 +64,8 @@ type ProductLike = {
   shipsInternationally?: boolean | null;
   freeShipping?: boolean | null;
   priceValidUntil?: string | null;
+  agentScore?: number;
+  rankingReason?: string;
 };
 
 type ProductPageMetadata = Pick<
@@ -1158,6 +1169,432 @@ function calledTool(response: GroqResponse, toolName: string) {
   );
 }
 
+function createTraceId() {
+  return `agent_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
+}
+
+function parseAgentMemory(value: unknown): AgentMemory {
+  if (!isRecord(value)) return {};
+
+  const preferredBudget =
+    typeof value.preferredBudget === "number" &&
+    Number.isFinite(value.preferredBudget)
+      ? value.preferredBudget
+      : null;
+  const deliveryCity =
+    typeof value.deliveryCity === "string" && value.deliveryCity.trim()
+      ? value.deliveryCity.trim().slice(0, 80)
+      : null;
+  const giftRecipients = Array.isArray(value.giftRecipients)
+    ? value.giftRecipients
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim().slice(0, 40))
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
+  const favoriteCategories = Array.isArray(value.favoriteCategories)
+    ? value.favoriteCategories
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim().slice(0, 40))
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
+  const recentSearches = Array.isArray(value.recentSearches)
+    ? value.recentSearches
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim().slice(0, 120))
+        .filter(Boolean)
+        .slice(0, 8)
+    : [];
+
+  return {
+    preferredBudget,
+    deliveryCity,
+    giftRecipients,
+    favoriteCategories,
+    recentSearches,
+  };
+}
+
+function extractBudget(message: string, memory: AgentMemory) {
+  const normalized = message.toLowerCase().replace(/,/g, "");
+  const budgetMatch = normalized.match(
+    /\b(?:under|below|less than|max|maximum|budget|rs\.?|lkr)\s*(\d{3,7})\b|\b(\d{3,7})\s*(?:rs|lkr)\b/i
+  );
+  const value = Number(budgetMatch?.[1] || budgetMatch?.[2]);
+
+  if (Number.isFinite(value) && value > 0) return value;
+
+  return typeof memory.preferredBudget === "number"
+    ? memory.preferredBudget
+    : null;
+}
+
+function extractDeliveryCity(message: string) {
+  const match = message.match(
+    /\b(?:to|in|near|around|delivery\s+(?:to|in))\s+([A-Z][A-Za-z\s-]{2,40})(?:\b|$)/i
+  );
+
+  return match?.[1]?.trim().replace(/\s+/g, " ") || null;
+}
+
+function extractGiftRecipients(message: string) {
+  const recipients = [
+    "mother",
+    "mom",
+    "amma",
+    "father",
+    "dad",
+    "appachchi",
+    "wife",
+    "husband",
+    "girlfriend",
+    "boyfriend",
+    "brother",
+    "sister",
+    "friend",
+  ];
+  const normalized = message.toLowerCase();
+
+  return recipients.filter((recipient) =>
+    new RegExp(`\\b${recipient}\\b`, "i").test(normalized)
+  );
+}
+
+function inferFavoriteCategories(message: string) {
+  const categories = [
+    "electronics",
+    "groceries",
+    "fashion",
+    "home",
+    "flowers",
+    "cakes",
+    "hampers",
+    "chocolates",
+    "toys",
+    "books",
+    "beauty",
+  ];
+  const normalized = message.toLowerCase();
+
+  return categories.filter((category) =>
+    new RegExp(`\\b${category}\\b`, "i").test(normalized)
+  );
+}
+
+function mergeUniqueStrings(existing: string[] = [], additions: string[] = []) {
+  return [...new Set([...existing, ...additions])].slice(0, 8);
+}
+
+function buildMemoryPatch(
+  message: string,
+  memory: AgentMemory,
+  shouldRememberSearch: boolean
+): AgentMemory {
+  const budget = extractBudget(message, {});
+  const deliveryCity = extractDeliveryCity(message);
+  const giftRecipients = extractGiftRecipients(message);
+  const favoriteCategories = inferFavoriteCategories(message);
+
+  return {
+    preferredBudget: budget ?? memory.preferredBudget ?? null,
+    deliveryCity: deliveryCity || memory.deliveryCity || null,
+    giftRecipients: mergeUniqueStrings(memory.giftRecipients, giftRecipients),
+    favoriteCategories: mergeUniqueStrings(
+      memory.favoriteCategories,
+      favoriteCategories
+    ),
+    recentSearches: shouldRememberSearch
+      ? [message.trim().slice(0, 120), ...(memory.recentSearches || [])]
+          .filter(Boolean)
+          .slice(0, 8)
+      : memory.recentSearches || [],
+  };
+}
+
+function inferAgentIntent(message: string, history: ChatHistoryMessage[]) {
+  const normalized = message.toLowerCase();
+
+  if (isOrderTrackingRequest(message)) return "order_tracking" as const;
+  if (/\b(?:checkout|pay|payment|place order|confirm order)\b/i.test(normalized)) {
+    return "checkout" as const;
+  }
+  if (/\b(?:cart|add this|add to cart|remove)\b/i.test(normalized)) {
+    return "cart" as const;
+  }
+  if (/\b(?:deliver|delivery|shipping|arrive|tomorrow|today)\b/i.test(normalized)) {
+    return "delivery" as const;
+  }
+  if (/\b(?:compare|versus|vs|which one|better|best value)\b/i.test(normalized)) {
+    return "compare" as const;
+  }
+  if (
+    /\b(?:find|show|recommend|suggest|search|browse|shop|buy|purchase|options?|shortlist|best|under|below|budget|gift)\b/i.test(
+      normalized
+    ) ||
+    history.slice(-4).some((item) => /\bproduct|option|cart\b/i.test(item.content))
+  ) {
+    return "product_search" as const;
+  }
+
+  return "small_talk" as const;
+}
+
+function buildAgentSteps(
+  intent: AgentState["intent"],
+  response?: GroqResponse,
+  productCount = 0
+): AgentStep[] {
+  const usedSearch = response ? calledTool(response, "kapruka_search_products") : false;
+  const usedDelivery = response
+    ? calledTool(response, "kapruka_check_delivery") ||
+      calledTool(response, "kapruka_delivery_check")
+    : false;
+
+  function status(id: AgentStep["id"]): AgentStepStatus {
+    if (id === "understand") return "completed";
+    if (id === "search_products") {
+      if (usedSearch || productCount > 0) return "completed";
+      return intent === "product_search" || intent === "compare"
+        ? "running"
+        : "pending";
+    }
+    if (id === "compare_products") {
+      if (productCount > 0) return "completed";
+      return intent === "compare" ? "running" : "pending";
+    }
+    if (id === "check_delivery") {
+      if (usedDelivery) return "completed";
+      return intent === "delivery" ? "running" : "pending";
+    }
+    if (id === "recommend") {
+      return productCount > 0 || intent === "small_talk" ? "completed" : "pending";
+    }
+    if (id === "cart") return intent === "cart" ? "blocked" : "pending";
+    if (id === "checkout") return intent === "checkout" ? "blocked" : "pending";
+
+    return "pending";
+  }
+
+  return [
+    { id: "understand", label: "Understand goal", status: status("understand") },
+    {
+      id: "search_products",
+      label: "Search products",
+      status: status("search_products"),
+    },
+    {
+      id: "compare_products",
+      label: "Compare options",
+      status: status("compare_products"),
+    },
+    {
+      id: "check_delivery",
+      label: "Check delivery",
+      status: status("check_delivery"),
+    },
+    { id: "recommend", label: "Recommend", status: status("recommend") },
+    { id: "cart", label: "Cart confirmation", status: status("cart") },
+    { id: "checkout", label: "Checkout approval", status: status("checkout") },
+  ];
+}
+
+function buildToolTimeline(response: GroqResponse, startedAt: number) {
+  let currentStartedAt = startedAt;
+
+  return (response.output || [])
+    .filter((item) => item.type === "mcp_call")
+    .map<AgentToolCall>((item) => {
+      const now = Date.now();
+      const latencyMs = Math.max(1, now - currentStartedAt);
+      currentStartedAt = now;
+
+      return {
+        name: item.name || "unknown_tool",
+        status: "called",
+        latencyMs,
+      };
+    });
+}
+
+function inferGoal(message: string, intent: AgentState["intent"]) {
+  if (intent === "small_talk") return "Handle the conversation naturally.";
+  if (intent === "checkout") return "Prepare checkout after user confirmation.";
+  if (intent === "cart") return "Help manage cart with explicit user control.";
+  if (intent === "delivery") return "Check delivery constraints before recommending.";
+  if (intent === "order_tracking") return "Track an existing paid order.";
+
+  return `Find and rank useful Kapruka options for: ${message.trim().slice(0, 160)}`;
+}
+
+function scoreProductForAgent(
+  product: ProductLike,
+  message: string,
+  memory: AgentMemory
+): ProductRankingSignal {
+  const reasons: string[] = [];
+  const normalized = `${message} ${product.name} ${product.description || ""} ${
+    product.brand || ""
+  } ${product.category || ""}`.toLowerCase();
+  const budget = extractBudget(message, memory);
+  let score = 50;
+
+  if (product.price !== null && budget) {
+    if (product.price <= budget) {
+      score += 20;
+      reasons.push("inside budget");
+    } else {
+      score -= 18;
+      reasons.push("over budget");
+    }
+  }
+
+  if (product.inStock === true) {
+    score += 12;
+    reasons.push("available");
+  } else if (product.inStock === false) {
+    score -= 20;
+    reasons.push("out of stock");
+  }
+
+  if (typeof product.rating === "number" && product.rating > 0) {
+    score += Math.min(12, product.rating * 2);
+    reasons.push("rated");
+  }
+
+  if (typeof product.reviewCount === "number" && product.reviewCount > 0) {
+    score += Math.min(8, Math.log10(product.reviewCount + 1) * 4);
+    reasons.push("review signal");
+  }
+
+  for (const category of memory.favoriteCategories || []) {
+    if (normalized.includes(category.toLowerCase())) {
+      score += 8;
+      reasons.push(`matches ${category}`);
+      break;
+    }
+  }
+
+  for (const recipient of memory.giftRecipients || []) {
+    if (normalized.includes(recipient.toLowerCase())) {
+      score += 6;
+      reasons.push(`recipient fit`);
+      break;
+    }
+  }
+
+  if (/\b(?:gift|birthday|anniversary|mother|father|wife|husband|friend)\b/i.test(message)) {
+    if (/\b(?:flower|cake|chocolate|hamper|gift|card)\b/i.test(normalized)) {
+      score += 10;
+      reasons.push("gift-friendly");
+    }
+  }
+
+  if (product.productUrl) score += 5;
+  if (product.imageUrl) score += 5;
+
+  return {
+    productId: product.id,
+    score: Math.round(Math.max(0, Math.min(100, score))),
+    reasons: reasons.slice(0, 4),
+  };
+}
+
+function rankProductsForAgent(
+  products: ProductLike[],
+  message: string,
+  memory: AgentMemory
+) {
+  const ranked = products.map((product) => ({
+    product,
+    ranking: scoreProductForAgent(product, message, memory),
+  }));
+
+  ranked.sort((first, second) => second.ranking.score - first.ranking.score);
+
+  return {
+    products: ranked.map(({ product, ranking }) => ({
+      ...product,
+      agentScore: ranking.score,
+      rankingReason: ranking.reasons.join(", ") || product.reason,
+    })),
+    ranking: ranked.map(({ ranking }) => ranking),
+  };
+}
+
+function buildAgentState({
+  traceId,
+  message,
+  memory,
+  response,
+  products,
+  ranking,
+  tools,
+  startedAt,
+  history,
+}: {
+  traceId: string;
+  message: string;
+  memory: AgentMemory;
+  response?: GroqResponse;
+  products: ProductLike[];
+  ranking: ProductRankingSignal[];
+  tools: AgentToolCall[];
+  startedAt: number;
+  history: ChatHistoryMessage[];
+}): AgentState {
+  const intent = inferAgentIntent(message, history);
+  const memoryPatch = buildMemoryPatch(message, memory, products.length > 0);
+  const steps = buildAgentSteps(intent, response, products.length);
+  const currentStep =
+    steps.find((step) => step.status === "running" || step.status === "blocked")
+      ?.id || "recommend";
+  const humanReviewRequired =
+    intent === "cart" ||
+    intent === "checkout" ||
+    /\b(?:checkout|pay|buy it|order it|add to cart)\b/i.test(message);
+  const observations = [
+    products.length > 0
+      ? `Ranked ${products.length} product${products.length === 1 ? "" : "s"} by relevance, price fit, stock, and quality signals.`
+      : "No product ranking was needed for this turn.",
+    humanReviewRequired
+      ? "Payment and checkout actions require explicit user confirmation."
+      : "No sensitive purchase action was taken automatically.",
+  ];
+
+  if (tools.length > 0) {
+    observations.push(`Called ${tools.length} commerce tool${tools.length === 1 ? "" : "s"}.`);
+  }
+
+  const agentState: AgentState = {
+    traceId,
+    goal: inferGoal(message, intent),
+    intent,
+    currentStep,
+    steps,
+    tools,
+    memoryPatch,
+    ranking,
+    humanReviewRequired,
+    observations,
+  };
+
+  console.info("Agent observability trace", {
+    traceId,
+    intent,
+    goal: agentState.goal,
+    durationMs: Date.now() - startedAt,
+    toolCalls: tools,
+    productCount: products.length,
+    humanReviewRequired,
+    memoryPatch,
+  });
+
+  return agentState;
+}
+
 function wantsProductCards(
   message: string,
   history: ChatHistoryMessage[],
@@ -1471,13 +1908,18 @@ function hasPlausibleOrderNumber(message: string) {
 }
 
 export async function POST(req: Request) {
+  const startedAt = Date.now();
+  const traceId = createTraceId();
+
   try {
     const {
       message,
       location: rawLocation,
       history: rawHistory,
+      memory: rawMemory,
     } = await req.json();
     const location = parseLocation(rawLocation);
+    const memory = parseAgentMemory(rawMemory);
     const history: ChatHistoryMessage[] = Array.isArray(rawHistory)
       ? rawHistory
           .filter(
@@ -1552,10 +1994,25 @@ export async function POST(req: Request) {
     const mergedProducts = mergeProducts(productsFromMcp, productsFromText);
     const shouldShowCards = wantsProductCards(message, history, data);
     const products = shouldShowCards
-      ? await enrichProductsWithMetadata(mergedProducts).then((items) =>
-          items.slice(0, 5)
-        )
+      ? await enrichProductsWithMetadata(mergedProducts).then((items) => {
+          const ranked = rankProductsForAgent(items, message, memory);
+
+          return ranked.products.slice(0, 5);
+        })
       : [];
+    const ranking = rankProductsForAgent(products, message, memory).ranking;
+    const tools = buildToolTimeline(data, startedAt);
+    const agentState = buildAgentState({
+      traceId,
+      message,
+      memory,
+      response: data,
+      products,
+      ranking,
+      tools,
+      startedAt,
+      history,
+    });
 
     const displayReply = cleanReplyForUi(reply, products.length);
 
@@ -1574,6 +2031,7 @@ export async function POST(req: Request) {
     return Response.json({
       reply: displayReply,
       products,
+      agentState,
       debug: extractToolDebug(data),
     });
   } catch (error) {

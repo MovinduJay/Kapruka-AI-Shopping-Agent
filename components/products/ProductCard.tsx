@@ -13,6 +13,7 @@ type Props = {
   product: ProductCardType;
   isInCart: boolean;
   onAddToCart: (product: ProductCardType) => void;
+  onViewDetails: (product: ProductCardType) => void;
 };
 
 function formatPrice(price: number) {
@@ -25,7 +26,12 @@ function ratingStarFill(rating: number, index: number) {
   return Math.max(0, Math.min(1, rating - index)) * 100;
 }
 
-export function ProductCard({ product, isInCart, onAddToCart }: Props) {
+export function ProductCard({
+  product,
+  isInCart,
+  onAddToCart,
+  onViewDetails,
+}: Props) {
   const [imageFailed, setImageFailed] = useState(false);
   const imageUrl =
     !imageFailed && (product.imageUrl || product.productUrl)
@@ -54,7 +60,22 @@ export function ProductCard({ product, isInCart, onAddToCart }: Props) {
       : product.brand || product.category;
 
   return (
-    <article className="product-card group flex h-full flex-col overflow-hidden rounded-[30px] border border-white/[0.09] bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-2 shadow-none transition duration-300 hover:border-emerald-300/70 hover:shadow-[0_8px_20px_-16px_rgba(16,185,129,0.4)]">
+    <article
+      role="button"
+      tabIndex={0}
+      aria-label={`View details for ${product.name}`}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("button, a")) return;
+        onViewDetails(product);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onViewDetails(product);
+        }
+      }}
+      className="product-card group flex h-full cursor-pointer flex-col overflow-hidden rounded-[30px] border border-white/[0.09] bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-2 shadow-none outline-none transition duration-300 hover:-translate-y-0.5 hover:border-emerald-300/70 hover:shadow-[0_8px_20px_-16px_rgba(16,185,129,0.4)] focus-visible:border-emerald-300 focus-visible:ring-4 focus-visible:ring-emerald-500/15"
+    >
       <div className="relative aspect-square overflow-hidden rounded-[24px] border border-white/[0.06] bg-slate-900">
         {imageUrl ? (
           // Images are already normalized through the local product-image proxy.
@@ -90,7 +111,7 @@ export function ProductCard({ product, isInCart, onAddToCart }: Props) {
 
           <h3
             title={product.name}
-            className="line-clamp-2 cursor-help text-base font-semibold leading-6 text-white"
+            className="line-clamp-2 text-base font-semibold leading-6 text-white"
           >
             {product.name}
           </h3>

@@ -204,6 +204,57 @@ button:disabled,
   animation: cart-drawer-in 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.product-detail-backdrop {
+  animation: cart-backdrop-in 260ms ease-out both;
+}
+
+@keyframes product-detail-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.97);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.product-detail-modal {
+  animation: product-detail-modal-in 420ms cubic-bezier(0.22, 1, 0.36, 1)
+    both;
+}
+
+.product-detail-scroll {
+  overscroll-behavior: contain;
+}
+
+.app-theme[data-theme="light"] .product-detail-modal,
+.app-theme[data-theme="light"] .product-detail-header,
+.app-theme[data-theme="light"] .product-detail-info {
+  background: #ffffff;
+}
+
+.app-theme[data-theme="light"] .product-detail-gallery {
+  background: linear-gradient(145deg, #f8fafc 0%, #eef2f7 62%, #ecfdf5 100%);
+}
+
+.app-theme[data-theme="light"] .product-detail-image-stage {
+  background: transparent;
+  border-color: rgb(15 23 42 / 0.1);
+  box-shadow: 0 28px 70px -48px rgb(15 23 42 / 0.35);
+}
+
+.app-theme[data-theme="light"] .product-detail-thumbnail {
+  background: transparent;
+}
+
+.app-theme[data-theme="light"] .product-detail-image-nav {
+  background: rgb(255 255 255 / 0.9);
+  border-color: rgb(15 23 42 / 0.12);
+  color: #172033;
+}
+
 .search-typing-dots {
   display: inline-flex;
   gap: 3px;
@@ -305,6 +356,8 @@ button:disabled,
 @media (prefers-reduced-motion: reduce) {
   .cart-backdrop,
   .cart-drawer,
+  .product-detail-backdrop,
+  .product-detail-modal,
   .search-typing-dots span,
   .search-wave-dots span,
   .search-progress-step {

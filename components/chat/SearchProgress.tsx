@@ -1,8 +1,8 @@
 const shoppingProgressSteps = [
-  "Looking through Kapruka products",
-  "Checking prices and availability",
-  "Matching useful options",
-  "Getting the best results ready",
+  "Understanding the shopping goal",
+  "Calling Kapruka commerce tools",
+  "Ranking price, stock, and fit",
+  "Preparing the next best action",
 ];
 
 type Props = {

@@ -24,12 +24,26 @@ import {
   type DeliveryResult,
 } from "@/components/delivery/DeliveryPanel";
 import { ProductCarousel } from "@/components/products/ProductCarousel";
+import { ProductDetailPanel } from "@/components/products/ProductDetailPanel";
+import type {
+  AgentChatResponse,
+  AgentMemory,
+  AgentState,
+} from "@/types/agent";
 import type { ProductCard as ProductCardType } from "@/types/product";
 
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   products?: ProductCardType[];
+  agentState?: AgentState;
+};
+
+type ChatStreamPart = {
+  type: string;
+  delta?: string;
+  data?: Pick<AgentChatResponse, "products" | "agentState">;
+  errorText?: string;
 };
 
 type Theme = "light" | "dark";
@@ -59,11 +73,81 @@ function saveTheme(theme: Theme) {
   window.dispatchEvent(new Event("kapruka-theme-change"));
 }
 
+const agentMemoryKey = "kapruka-agent-memory";
+const agentRunsKey = "kapruka-agent-runs";
+
+function loadAgentMemory(): AgentMemory {
+  try {
+    const raw = window.localStorage.getItem(agentMemoryKey);
+
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw) as AgentMemory;
+
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAgentMemory(memory: AgentMemory) {
+  window.localStorage.setItem(agentMemoryKey, JSON.stringify(memory));
+}
+
+function saveAgentRun(agentState: AgentState) {
+  try {
+    const raw = window.localStorage.getItem(agentRunsKey);
+    const previous = raw ? (JSON.parse(raw) as AgentState[]) : [];
+    const next = [agentState, ...previous].slice(0, 30);
+
+    window.localStorage.setItem(agentRunsKey, JSON.stringify(next));
+  } catch {
+    window.localStorage.setItem(agentRunsKey, JSON.stringify([agentState]));
+  }
+}
+
+function mergeAgentMemory(
+  current: AgentMemory,
+  patch: AgentMemory = {}
+): AgentMemory {
+  return {
+    preferredBudget: patch.preferredBudget ?? current.preferredBudget ?? null,
+    deliveryCity: patch.deliveryCity ?? current.deliveryCity ?? null,
+    giftRecipients: [
+      ...new Set([...(current.giftRecipients || []), ...(patch.giftRecipients || [])]),
+    ].slice(0, 8),
+    favoriteCategories: [
+      ...new Set([
+        ...(current.favoriteCategories || []),
+        ...(patch.favoriteCategories || []),
+      ]),
+    ].slice(0, 8),
+    recentSearches: [
+      ...new Set([...(patch.recentSearches || []), ...(current.recentSearches || [])]),
+    ].slice(0, 8),
+  };
+}
+
 function splitAssistantContent(content: string) {
   return content
     .split(/\n+|(?<=[.!?])\s+(?=[\p{Lu}\p{Lt}\p{Lo}"'(])/u)
     .map((part) => part.trim())
     .filter(Boolean);
+}
+
+function parseSseEvents(buffer: string) {
+  const events = buffer.split(/\n\n/);
+  const remainder = events.pop() || "";
+  const payloads = events
+    .flatMap((event) =>
+      event
+        .split(/\n/)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice(5).trim())
+    )
+    .filter(Boolean);
+
+  return { payloads, remainder };
 }
 
 export default function Home() {
@@ -75,6 +159,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [chatStarted, setChatStarted] = useState(false);
   const [cart, setCart] = useState<ProductCardType[]>([]);
+  const [selectedProduct, setSelectedProduct] =
+    useState<ProductCardType | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [deliveryPanelOpen, setDeliveryPanelOpen] = useState(false);
   const [checkoutPanelOpen, setCheckoutPanelOpen] = useState(false);
@@ -156,6 +242,11 @@ export default function Home() {
 
     if (!userMessage || loading) return;
 
+    const requestHistory = messages.slice(-8).map(({ role, content }) => ({
+      role,
+      content,
+    }));
+
     setChatStarted(true);
     setMessages((prev) => [
       ...prev,
@@ -163,13 +254,19 @@ export default function Home() {
         role: "user",
         content: userMessage,
       },
+      {
+        role: "assistant",
+        content: "",
+        products: [],
+      },
     ]);
 
     setInput("");
     setLoading(true);
 
     try {
-      const res = await fetch("/api/chat", {
+      const memory = loadAgentMemory();
+      const res = await fetch("/api/chat/stream", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -177,35 +274,126 @@ export default function Home() {
         body: JSON.stringify({
           message: userMessage,
           location: sharedLocation,
-          history: messages.slice(-8).map(({ role, content }) => ({
-            role,
-            content,
-          })),
+          history: requestHistory,
+          memory,
         }),
       });
 
-      const data = await res.json();
+      if (!res.ok || !res.body) {
+        throw new Error("Chat stream failed");
+      }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            data.reply ||
-            data.error ||
-            "I lost the thread for a second. Send that again and I'll pick it up.",
-          products: data.products || [],
-        },
-      ]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content:
-            "That connection dropped on me. Try once more and I'll get back to the shortlist.",
-        },
-      ]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      async function handleStreamPart(part: ChatStreamPart) {
+        if (part.type === "text-delta" && part.delta) {
+          setMessages((prev) => {
+            const next = [...prev];
+            const lastIndex = next.length - 1;
+            const last = next[lastIndex];
+
+            if (last?.role !== "assistant") return prev;
+
+            next[lastIndex] = {
+              ...last,
+              content: `${last.content}${part.delta}`,
+            };
+
+            return next;
+          });
+        }
+
+        if (part.type === "data-result") {
+          const data = part.data;
+
+          if (data?.agentState?.memoryPatch) {
+            saveAgentMemory(
+              mergeAgentMemory(memory, data.agentState.memoryPatch)
+            );
+          }
+
+          if (data?.agentState) {
+            saveAgentRun(data.agentState);
+          }
+
+          setMessages((prev) => {
+            const next = [...prev];
+            const lastIndex = next.length - 1;
+            const last = next[lastIndex];
+
+            if (last?.role !== "assistant") return prev;
+
+            next[lastIndex] = {
+              ...last,
+              products: data?.products || [],
+              agentState: data?.agentState,
+            };
+
+            return next;
+          });
+        }
+
+        if (part.type === "error") {
+          throw new Error(part.errorText || "Chat stream failed");
+        }
+      }
+
+      while (true) {
+        const { value, done } = await reader.read();
+
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const parsed = parseSseEvents(buffer);
+        buffer = parsed.remainder;
+
+        for (const payload of parsed.payloads) {
+          if (payload === "[DONE]") continue;
+
+          await handleStreamPart(JSON.parse(payload) as ChatStreamPart);
+        }
+      }
+
+      if (buffer.trim()) {
+        const parsed = parseSseEvents(`${buffer}\n\n`);
+
+        for (const payload of parsed.payloads) {
+          if (payload === "[DONE]") continue;
+
+          await handleStreamPart(JSON.parse(payload) as ChatStreamPart);
+        }
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : "That connection dropped on me. Try once more and I'll get back to the shortlist.";
+
+      setMessages((prev) => {
+        const next = [...prev];
+        const lastIndex = next.length - 1;
+        const last = next[lastIndex];
+
+        if (last?.role === "assistant") {
+          next[lastIndex] = {
+            ...last,
+            content: last.content || message,
+          };
+
+          return next;
+        }
+
+        return [
+          ...prev,
+          {
+            role: "assistant",
+            content: message,
+          },
+        ];
+      });
     } finally {
       setLoading(false);
     }
@@ -219,6 +407,16 @@ export default function Home() {
   const latestUserMessage =
     [...messages].reverse().find((message) => message.role === "user")
       ?.content || "";
+
+  function userMessageBefore(messageIndex: number) {
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+
+      if (message.role === "user") return message.content;
+    }
+
+    return latestUserMessage;
+  }
 
   return (
     <main
@@ -356,6 +554,10 @@ export default function Home() {
                         products={message.products}
                         cartProductIds={cart.map((item) => item.id)}
                         onAddToCart={addToCart}
+                        onViewDetails={setSelectedProduct}
+                        onSearchRevision={sendMessage}
+                        searchQuery={userMessageBefore(index)}
+                        disabled={loading}
                       />
                     )}
                 </div>
@@ -528,6 +730,17 @@ export default function Home() {
           setDeliveryPanelOpen(false);
           setCheckoutPanelOpen(true);
         }}
+      />
+
+      <ProductDetailPanel
+        product={selectedProduct}
+        isInCart={
+          selectedProduct
+            ? cart.some((item) => item.id === selectedProduct.id)
+            : false
+        }
+        onAddToCart={addToCart}
+        onClose={() => setSelectedProduct(null)}
       />
 
       <CheckoutPanel
