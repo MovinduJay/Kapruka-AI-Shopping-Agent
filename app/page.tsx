@@ -150,6 +150,19 @@ function parseSseEvents(buffer: string) {
   return { payloads, remainder };
 }
 
+function postObservabilityEvent(path: string, body: unknown) {
+  fetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    keepalive: true,
+  }).catch(() => {
+    // Observability must never block the shopping flow.
+  });
+}
+
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -209,12 +222,42 @@ export default function Home() {
 
       if (exists) return prev;
 
-      return [...prev, product];
+      const next = [...prev, product];
+
+      postObservabilityEvent("/api/observability/product-interaction", {
+        product,
+        action: "add_to_cart",
+      });
+      postObservabilityEvent("/api/observability/cart", { cart: next });
+
+      return next;
     });
   }
 
   function removeFromCart(productId: string) {
-    setCart((prev) => prev.filter((item) => item.id !== productId));
+    setCart((prev) => {
+      const product = prev.find((item) => item.id === productId);
+      const next = prev.filter((item) => item.id !== productId);
+
+      if (product) {
+        postObservabilityEvent("/api/observability/product-interaction", {
+          product,
+          action: "remove_from_cart",
+        });
+      }
+
+      postObservabilityEvent("/api/observability/cart", { cart: next });
+
+      return next;
+    });
+  }
+
+  function viewProductDetails(product: ProductCardType) {
+    setSelectedProduct(product);
+    postObservabilityEvent("/api/observability/product-interaction", {
+      product,
+      action: "view_details",
+    });
   }
 
   function updateComposerGlass(element: HTMLDivElement) {
@@ -554,7 +597,7 @@ export default function Home() {
                         products={message.products}
                         cartProductIds={cart.map((item) => item.id)}
                         onAddToCart={addToCart}
-                        onViewDetails={setSelectedProduct}
+                        onViewDetails={viewProductDetails}
                         onSearchRevision={sendMessage}
                         searchQuery={userMessageBefore(index)}
                         disabled={loading}

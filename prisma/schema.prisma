@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model UserSession {
+  id                  String               @id @default(cuid())
+  sessionToken        String               @unique
+  userAgent           String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  lastSeenAt          DateTime             @default(now())
+  preferences         UserPreference?
+  agentRuns           AgentRun[]
+  cartSnapshots       CartSnapshot[]
+  productInteractions ProductInteraction[]
+}
+
+model UserPreference {
+  id                 String      @id @default(cuid())
+  sessionId          String      @unique
+  preferredBudget    Int?
+  deliveryCity       String?
+  giftRecipients     String[]    @default([])
+  favoriteCategories String[]    @default([])
+  recentSearches     String[]    @default([])
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  session            UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model AgentRun {
+  id                  String          @id @default(cuid())
+  traceId             String          @unique
+  sessionId           String?
+  userMessage         String
+  assistantReply      String?
+  intent              String
+  goal                String
+  currentStep         String
+  humanReviewRequired Boolean         @default(false)
+  latencyMs           Int?
+  productCount        Int             @default(0)
+  productsJson        Json?
+  rankingJson         Json?
+  observationsJson    Json?
+  error               String?
+  createdAt           DateTime        @default(now())
+  session             UserSession?    @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  toolCalls           AgentToolCall[]
+
+  @@index([sessionId, createdAt])
+  @@index([intent, createdAt])
+}
+
+model AgentToolCall {
+  id            String   @id @default(cuid())
+  runId         String
+  name          String
+  status        String
+  latencyMs     Int?
+  argumentsJson Json?
+  createdAt     DateTime @default(now())
+  run           AgentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([name, createdAt])
+}
+
+model CartSnapshot {
+  id        String      @id @default(cuid())
+  sessionId String
+  itemsJson Json
+  total     Int?
+  createdAt DateTime    @default(now())
+  session   UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model ProductInteraction {
+  id          String      @id @default(cuid())
+  sessionId   String
+  productId   String
+  productName String?
+  action      String
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+  session     UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@index([productId, action])
+}

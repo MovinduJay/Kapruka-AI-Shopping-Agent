@@ -2,6 +2,12 @@ import {
   createUIMessageStream,
   createUIMessageStreamResponse,
 } from "ai";
+import { cookies, headers } from "next/headers";
+import { randomUUID } from "crypto";
+import {
+  sessionCookieName,
+  upsertUserSession,
+} from "@/lib/agent-persistence";
 import type { AgentChatResponse } from "@/types/agent";
 
 export const maxDuration = 60;
@@ -17,6 +23,20 @@ function textChunks(value: string) {
 export async function POST(req: Request) {
   const payload = await req.json();
   const textId = `assistant-${Date.now().toString(36)}`;
+  const cookieStore = await cookies();
+  const headerStore = await headers();
+  const sessionToken =
+    cookieStore.get(sessionCookieName)?.value || randomUUID();
+  const userAgent = headerStore.get("user-agent");
+  const session = await upsertUserSession(sessionToken, userAgent);
+
+  cookieStore.set(sessionCookieName, sessionToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+  });
 
   return createUIMessageStreamResponse({
     stream: createUIMessageStream({
@@ -38,7 +58,10 @@ export async function POST(req: Request) {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({
+            ...payload,
+            sessionId: session?.id || null,
+          }),
         });
 
         const data = (await response.json()) as AgentChatResponse;

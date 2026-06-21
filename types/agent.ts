@@ -19,6 +19,7 @@ export type AgentToolCall = {
   name: string;
   status: "called" | "skipped" | "failed";
   latencyMs?: number;
+  arguments?: unknown;
 };
 
 export type AgentMemory = {

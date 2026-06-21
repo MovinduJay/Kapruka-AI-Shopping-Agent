@@ -6,6 +6,11 @@ import type {
   AgentToolCall,
   ProductRankingSignal,
 } from "@/types/agent";
+import {
+  getAgentMemoryForSession,
+  mergeAgentMemoryForPersistence,
+  persistAgentRun,
+} from "@/lib/agent-persistence";
 
 type GroqOutputContent = {
   type?: string;
@@ -1415,6 +1420,7 @@ function buildToolTimeline(response: GroqResponse, startedAt: number) {
         name: item.name || "unknown_tool",
         status: "called",
         latencyMs,
+        arguments: parsePossibleJson(item.arguments || "") || item.arguments,
       };
     });
 }
@@ -1917,9 +1923,18 @@ export async function POST(req: Request) {
       location: rawLocation,
       history: rawHistory,
       memory: rawMemory,
+      sessionId,
     } = await req.json();
     const location = parseLocation(rawLocation);
-    const memory = parseAgentMemory(rawMemory);
+    const clientMemory = parseAgentMemory(rawMemory);
+    const databaseMemory =
+      typeof sessionId === "string"
+        ? await getAgentMemoryForSession(sessionId)
+        : {};
+    const memory = mergeAgentMemoryForPersistence(
+      clientMemory,
+      databaseMemory
+    );
     const history: ChatHistoryMessage[] = Array.isArray(rawHistory)
       ? rawHistory
           .filter(
@@ -2015,6 +2030,15 @@ export async function POST(req: Request) {
     });
 
     const displayReply = cleanReplyForUi(reply, products.length);
+
+    await persistAgentRun({
+      sessionId: typeof sessionId === "string" ? sessionId : null,
+      userMessage: message,
+      assistantReply: displayReply,
+      agentState,
+      products,
+      latencyMs: Date.now() - startedAt,
+    });
 
     console.log(
       "Products sent to UI:",
