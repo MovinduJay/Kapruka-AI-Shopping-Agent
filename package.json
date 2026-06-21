@@ -12,6 +12,7 @@
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.83",
     "@prisma/client": "6.19.3",
     "ai": "^6.0.208",
     "groq-sdk": "^1.2.1",

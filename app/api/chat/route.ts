@@ -1,11 +1,14 @@
 import type {
   AgentMemory,
+  AgentAction,
   AgentState,
   AgentStep,
   AgentStepStatus,
   AgentToolCall,
   ProductRankingSignal,
 } from "@/types/agent";
+import { generateText } from "ai";
+import { google } from "@ai-sdk/google";
 import {
   getAgentMemoryForSession,
   mergeAgentMemoryForPersistence,
@@ -87,10 +90,150 @@ type ProductPageMetadata = Pick<
   | "priceValidUntil"
 >;
 
+type JsonRpcResponse<T> = {
+  result?: T;
+  error?: {
+    code?: number;
+    message?: string;
+  };
+};
+
+type McpToolResult = {
+  content?: Array<{
+    type?: string;
+    text?: string;
+  }>;
+  structuredContent?: {
+    result?: string;
+  };
+  isError?: boolean;
+};
+
+type DeliveryCity = {
+  name: string;
+  aliases?: string[];
+};
+
+type DeliveryCheckResult = {
+  city?: string;
+  checked_date?: string;
+  available?: boolean;
+  rate?: number;
+  currency?: string;
+  reason?: string | null;
+  next_available_date?: string | null;
+  perishable_warning?: string | null;
+};
+
 const productMetadataCache = new Map<string, ProductPageMetadata | null>();
+const PRODUCT_CARD_LIMIT = 8;
+const SEARCH_RESULT_LIMIT = 20;
+const MCP_URL =
+  process.env.KAPRUKA_MCP_URL || "https://mcp.kapruka.com/mcp";
+const MCP_HEADERS = {
+  Accept: "application/json, text/event-stream",
+  "Content-Type": "application/json",
+};
 
 function isRecord(value: unknown): value is AnyRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseMcpResponse<T>(text: string): JsonRpcResponse<T> {
+  const dataLines = text
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim())
+    .filter(Boolean);
+
+  return JSON.parse(
+    dataLines.length > 0 ? dataLines.join("\n") : text
+  ) as JsonRpcResponse<T>;
+}
+
+function parseMcpToolJson(value: McpToolResult) {
+  const text =
+    value.structuredContent?.result ||
+    value.content?.find((item) => item.type === "text")?.text;
+
+  if (!text || value.isError) return null;
+
+  return parsePossibleJson(text);
+}
+
+async function startDirectMcpSession() {
+  const response = await fetch(MCP_URL, {
+    method: "POST",
+    headers: MCP_HEADERS,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-03-26",
+        capabilities: {},
+        clientInfo: {
+          name: "kapruka-ai-shopping-agent",
+          version: "1.0.0",
+        },
+      },
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const payload = parseMcpResponse<unknown>(await response.text());
+  const sessionId = response.headers.get("mcp-session-id");
+
+  if (!response.ok || payload.error || !sessionId) {
+    throw new Error(payload.error?.message || "Could not connect to Kapruka.");
+  }
+
+  const headers = {
+    ...MCP_HEADERS,
+    "mcp-session-id": sessionId,
+  };
+
+  await fetch(MCP_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  return headers;
+}
+
+async function callDirectMcpTool(
+  headers: Record<string, string>,
+  id: number,
+  name: string,
+  params: Record<string, unknown>
+) {
+  const response = await fetch(MCP_URL, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id,
+      method: "tools/call",
+      params: {
+        name,
+        arguments: {
+          params,
+        },
+      },
+    }),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const payload = parseMcpResponse<McpToolResult>(await response.text());
+
+  if (!response.ok || payload.error || !payload.result) {
+    throw new Error(payload.error?.message || `${name} failed.`);
+  }
+
+  return payload.result;
 }
 
 function extractText(response: GroqResponse): string {
@@ -526,6 +669,186 @@ function productFromObject(obj: AnyRecord, index: number): ProductLike | null {
     brand: pickBrandName(obj),
     category: pickCategoryName(obj),
     shipsInternationally,
+  };
+}
+
+function buildSearchQuery(message: string, memory: AgentMemory) {
+  const normalized = message.toLowerCase();
+  const terms = [message];
+
+  if (/\b(?:watch|watches|wristwatch|smartwatch)\b/i.test(normalized)) {
+    terms.push("watch watches wristwatch smartwatch analog digital");
+  }
+
+  if (/\b(?:flower|flowers|bouquet|rose|roses)\b/i.test(normalized)) {
+    terms.push("flowers bouquet arrangement");
+  }
+
+  if (/\b(?:earbuds|headphones|earphones)\b/i.test(normalized)) {
+    terms.push("earbuds headphones earphones wireless");
+  }
+
+  if (/\b(?:phone|phones|mobile)\b/i.test(normalized)) {
+    terms.push("phone mobile smartphone");
+  }
+
+  if (/\b(?:perfume|fragrance|cologne)\b/i.test(normalized)) {
+    terms.push("perfume fragrance cologne");
+  }
+
+  if (/\b(?:wife|girlfriend|anniversary|romantic|love)\b/i.test(normalized)) {
+    terms.push("romantic flowers chocolates gift");
+  }
+
+  if (/\b(?:birthday|bday)\b/i.test(normalized)) {
+    terms.push("birthday gift");
+  }
+
+  if (memory.favoriteCategories?.length) {
+    terms.push(memory.favoriteCategories.slice(0, 2).join(" "));
+  }
+
+  return terms
+    .join(" ")
+    .replace(/\b(?:need|want|some|please|pls|show|find|give me|get me|looking for|a|an|the)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function searchKaprukaProductsDirect(
+  message: string,
+  memory: AgentMemory
+) {
+  const headers = await startDirectMcpSession();
+  const budget = extractBudget(message, memory);
+  const result = await callDirectMcpTool(headers, 2, "kapruka_search_products", {
+    q: buildSearchQuery(message, memory),
+    category: null,
+    limit: SEARCH_RESULT_LIMIT,
+    cursor: null,
+    currency: "LKR",
+    min_price: null,
+    max_price: budget ?? null,
+    in_stock_only: false,
+    sort: "relevance",
+    include_stubs: false,
+    response_format: "json",
+  });
+  const parsed = parseMcpToolJson(result);
+
+  if (!parsed) return [];
+
+  return collectProductObjects(parsed)
+    .map((productObject, index) => productFromObject(productObject, index))
+    .filter((product): product is ProductLike => Boolean(product));
+}
+
+function getSriLankaDate(offsetDays = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + offsetDays);
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Colombo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const values = Object.fromEntries(
+    parts.map((part) => [part.type, part.value])
+  );
+
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function extractDeliveryDate(message: string) {
+  const explicitDate = message.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
+
+  if (explicitDate) return explicitDate;
+  if (/\btomorrow\b/i.test(message)) return getSriLankaDate(1);
+
+  return getSriLankaDate();
+}
+
+function normalizeDeliveryCity(value: string) {
+  return value.trim().toLocaleLowerCase("en");
+}
+
+function selectCanonicalDeliveryCity(
+  cities: DeliveryCity[],
+  requestedCity: string
+) {
+  const normalizedRequest = normalizeDeliveryCity(requestedCity);
+
+  return (
+    cities.find(
+      (city) => normalizeDeliveryCity(city.name) === normalizedRequest
+    ) ||
+    cities.find((city) =>
+      city.aliases?.some(
+        (alias) => normalizeDeliveryCity(alias) === normalizedRequest
+      )
+    ) ||
+    cities[0] ||
+    null
+  );
+}
+
+async function checkKaprukaDeliveryDirect(city: string, message: string) {
+  const headers = await startDirectMcpSession();
+  const deliveryDate = extractDeliveryDate(message);
+  const citiesResult = await callDirectMcpTool(
+    headers,
+    2,
+    "kapruka_list_delivery_cities",
+    {
+      query: city,
+      limit: 10,
+      response_format: "json",
+    }
+  );
+  const citiesPayload = parseMcpToolJson(citiesResult) as
+    | { cities?: DeliveryCity[] }
+    | null;
+  const canonicalCity = selectCanonicalDeliveryCity(
+    citiesPayload?.cities || [],
+    city
+  );
+
+  if (!canonicalCity) {
+    return {
+      city,
+      checkedDate: deliveryDate,
+      available: false,
+      fee: null as number | null,
+      currency: "LKR",
+      reason: `Kapruka does not recognize "${city}" as a delivery city.`,
+      earliestDate: null as string | null,
+      warning: null as string | null,
+    };
+  }
+
+  const deliveryResult = await callDirectMcpTool(
+    headers,
+    3,
+    "kapruka_check_delivery",
+    {
+      city: canonicalCity.name,
+      delivery_date: deliveryDate,
+      product_id: null,
+      response_format: "json",
+    }
+  );
+  const delivery = parseMcpToolJson(deliveryResult) as DeliveryCheckResult | null;
+
+  return {
+    city: delivery?.city || canonicalCity.name,
+    checkedDate: delivery?.checked_date || deliveryDate,
+    available: delivery?.available === true,
+    fee: typeof delivery?.rate === "number" ? delivery.rate : null,
+    currency: delivery?.currency || "LKR",
+    reason: delivery?.reason || null,
+    earliestDate: delivery?.next_available_date || null,
+    warning: delivery?.perishable_warning || null,
   };
 }
 
@@ -1242,7 +1565,15 @@ function extractDeliveryCity(message: string) {
     /\b(?:to|in|near|around|delivery\s+(?:to|in))\s+([A-Z][A-Za-z\s-]{2,40})(?:\b|$)/i
   );
 
-  return match?.[1]?.trim().replace(/\s+/g, " ") || null;
+  const city = match?.[1]
+    ?.replace(
+      /\b(?:available|availability|today|tomorrow|on|for|with|please|pls|now|delivery|deliver)\b[\s\S]*$/i,
+      ""
+    )
+    .trim()
+    .replace(/\s+/g, " ");
+
+  return city || null;
 }
 
 function extractGiftRecipients(message: string) {
@@ -1319,10 +1650,87 @@ function buildMemoryPatch(
   };
 }
 
-function inferAgentIntent(message: string, history: ChatHistoryMessage[]) {
+function hasConcreteShoppingSubject(message: string) {
+  return /\b(?:gift|gifts|present|presents|flower|flowers|bouquet|rose|roses|cake|cakes|chocolate|chocolates|hamper|hampers|mug|mugs|perfume|watch|watches|phone|phones|laptop|laptops|earbuds|headphones|speaker|speakers|toy|toys|book|books|shoes|bag|bags|wallet|wallets|dress|shirt|saree|groceries|grocery|tea|coffee|fruit|fruits|gift\s+(?:box|set|basket|pack)|birthday\s+(?:cake|gift)|anniversary\s+gift)\b/i.test(
+    message
+  );
+}
+
+function isVagueGiftIdeaRequest(message: string) {
   const normalized = message.toLowerCase();
 
+  return (
+    /\b(?:gift|birthday|bday|anniversary|present|give)\b/i.test(normalized) &&
+    /\b(?:no idea|not sure|confused|don't know|dont know|what to give|what should i give|what can i give|help me think|ideas?)\b/i.test(
+      normalized
+    ) &&
+    !/\b(?:find|show|search|browse|shop|buy|purchase|options?|shortlist|products?)\b/i.test(
+      normalized
+    )
+  );
+}
+
+function isEmotionalSmallTalk(message: string) {
+  return /\b(?:bad day|rough day|terrible day|awful day|sad|stressed|stressful|tired|exhausted|angry|mad|upset|lonely|alone|bored|overwhelmed|burnt out|burned out|not okay|not feeling good|feel like crap|feeling low|depressed|anxious)\b/i.test(
+    message
+  );
+}
+
+function hasShoppingFollowUpContext(
+  message: string,
+  history: ChatHistoryMessage[]
+) {
+  const normalized = message.toLowerCase();
+  const asksForDifferentResults =
+    /\b(?:more|others?|another|alternatives?|cheaper|budget|premium|similar|different|else|more results|filter)\b/i.test(
+      normalized
+    );
+  const hasShoppingContext = history
+    .slice(-4)
+    .some(
+      (item) =>
+        item.role === "assistant" &&
+        /\b(?:pick|option|product|price|budget|rs\.?|lkr|cart)\b/i.test(
+          item.content
+        )
+    );
+
+  return asksForDifferentResults && hasShoppingContext;
+}
+
+function clearlyAsksForProductSearch(
+  message: string,
+  history: ChatHistoryMessage[]
+) {
+  const normalized = message
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s.'-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (isVagueGiftIdeaRequest(normalized)) return false;
+
+  const explicitBrowseVerb =
+    /\b(?:find|show|recommend|suggest|search|browse|shop|buy|purchase|look for|looking for|options?|choices?|shortlist|best|top)\b/i.test(
+      normalized
+    );
+  const concreteNeed =
+    /\b(?:i\s+)?(?:need|want|get me|give me)\b/i.test(normalized) &&
+    hasConcreteShoppingSubject(normalized);
+
+  return (
+    (explicitBrowseVerb && hasConcreteShoppingSubject(normalized)) ||
+    concreteNeed ||
+    hasShoppingFollowUpContext(normalized, history)
+  );
+}
+
+function inferAgentIntent(message: string, history: ChatHistoryMessage[]) {
+  const normalized = message.toLowerCase();
+  const asksForProductSearch = clearlyAsksForProductSearch(message, history);
+
   if (isOrderTrackingRequest(message)) return "order_tracking" as const;
+  if (isVagueGiftIdeaRequest(message)) return "small_talk" as const;
   if (/\b(?:checkout|pay|payment|place order|confirm order)\b/i.test(normalized)) {
     return "checkout" as const;
   }
@@ -1335,16 +1743,149 @@ function inferAgentIntent(message: string, history: ChatHistoryMessage[]) {
   if (/\b(?:compare|versus|vs|which one|better|best value)\b/i.test(normalized)) {
     return "compare" as const;
   }
-  if (
-    /\b(?:find|show|recommend|suggest|search|browse|shop|buy|purchase|options?|shortlist|best|under|below|budget|gift)\b/i.test(
-      normalized
-    ) ||
-    history.slice(-4).some((item) => /\bproduct|option|cart\b/i.test(item.content))
-  ) {
+  if (asksForProductSearch) {
     return "product_search" as const;
   }
 
   return "small_talk" as const;
+}
+
+function buildPlannedActions(
+  intent: AgentState["intent"],
+  message: string
+): AgentAction[] {
+  const normalized = message.toLowerCase();
+
+  if (intent === "small_talk") {
+    return [{ id: "reply", label: "Reply naturally" }];
+  }
+
+  if (intent === "order_tracking") {
+    return [
+      {
+        id: "trackOrder",
+        label: "Track paid order",
+        toolName: "kapruka_track_order",
+      },
+    ];
+  }
+
+  if (intent === "delivery") {
+    return [
+      { id: "reply", label: "Identify delivery constraint" },
+      {
+        id: "checkDelivery",
+        label: "Check delivery availability",
+        toolName: "kapruka_check_delivery",
+      },
+    ];
+  }
+
+  if (intent === "cart") {
+    return [
+      { id: "compareProducts", label: "Confirm the best item" },
+      {
+        id: "prepareCart",
+        label: "Prepare cart action",
+        needsConfirmation: true,
+      },
+    ];
+  }
+
+  if (intent === "checkout") {
+    return [
+      { id: "compareProducts", label: "Confirm purchase choice" },
+      {
+        id: "checkDelivery",
+        label: "Verify delivery before checkout",
+        toolName: "kapruka_check_delivery",
+      },
+      {
+        id: "prepareCheckout",
+        label: "Prepare checkout approval",
+        needsConfirmation: true,
+      },
+    ];
+  }
+
+  const actions: AgentAction[] = [
+    {
+      id: "searchProducts",
+      label: "Search Kapruka products",
+      toolName: "kapruka_search_products",
+    },
+    { id: "compareProducts", label: "Compare value and fit" },
+  ];
+
+  if (
+    intent === "compare" ||
+    /\b(?:details?|specs?|warranty|reviews?|rating)\b/i.test(normalized)
+  ) {
+    actions.push({
+      id: "getProductDetails",
+      label: "Inspect product details",
+      toolName: "kapruka_get_product",
+    });
+  }
+
+  if (/\b(?:deliver|delivery|tomorrow|today|city|kandy|colombo|galle)\b/i.test(normalized)) {
+    actions.push({
+      id: "checkDelivery",
+      label: "Check delivery if product is clear",
+      toolName: "kapruka_check_delivery",
+    });
+  }
+
+  return actions;
+}
+
+function buildMemoryNotes(memory: AgentMemory, message: string) {
+  const notes: string[] = [];
+  const budget = extractBudget(message, memory);
+  const explicitBudget = extractBudget(message, {});
+  const explicitCity = extractDeliveryCity(message);
+  const normalized = message.toLowerCase();
+  const isFollowUp =
+    /\b(?:same|again|more like|similar|like that|that one|those|previous|last time|keep it|around the same)\b/i.test(
+      normalized
+    );
+
+  if (budget && (explicitBudget || isFollowUp)) {
+    notes.push(`budget preference around Rs. ${budget.toLocaleString("en-LK")}`);
+  }
+
+  if (explicitCity || (isFollowUp && memory.deliveryCity)) {
+    notes.push(`usual delivery city: ${memory.deliveryCity}`);
+  }
+
+  if (isFollowUp && memory.giftRecipients?.length) {
+    notes.push(`gift context: ${memory.giftRecipients.join(", ")}`);
+  }
+
+  if (isFollowUp && memory.favoriteCategories?.length) {
+    notes.push(`categories user has cared about: ${memory.favoriteCategories.join(", ")}`);
+  }
+
+  if (isFollowUp && memory.recentSearches?.[0]) {
+    notes.push(`recent search: ${memory.recentSearches[0]}`);
+  }
+
+  return notes.slice(0, 5);
+}
+
+function buildAgentPlan(
+  message: string,
+  history: ChatHistoryMessage[],
+  memory: AgentMemory
+) {
+  const intent = inferAgentIntent(message, history);
+
+  return {
+    intent,
+    goal: inferGoal(message, intent),
+    actions: buildPlannedActions(intent, message),
+    memoryNotes: buildMemoryNotes(memory, message),
+  };
 }
 
 function buildAgentSteps(
@@ -1435,26 +1976,162 @@ function inferGoal(message: string, intent: AgentState["intent"]) {
   return `Find and rank useful Kapruka options for: ${message.trim().slice(0, 160)}`;
 }
 
+function tokenizeForRanking(value: string) {
+  const stopWords = new Set([
+    "the",
+    "and",
+    "for",
+    "with",
+    "under",
+    "below",
+    "show",
+    "find",
+    "best",
+    "good",
+    "need",
+    "want",
+    "give",
+    "options",
+    "product",
+    "products",
+    "rs",
+    "lkr",
+  ]);
+
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length > 2 && !stopWords.has(token));
+}
+
+function productTextForRanking(product: ProductLike) {
+  return `${product.name} ${product.description || ""} ${product.brand || ""} ${
+    product.category || ""
+  }`;
+}
+
+function strictRequestAliases(message: string) {
+  const normalized = message.toLowerCase();
+  const aliasGroups: string[][] = [];
+
+  if (/\b(?:watch|watches|wristwatch|smartwatch)\b/i.test(normalized)) {
+    aliasGroups.push([
+      "watch",
+      "watches",
+      "wristwatch",
+      "smartwatch",
+      "timepiece",
+      "analog",
+      "digital",
+    ]);
+  }
+
+  if (/\b(?:flower|flowers|bouquet|rose|roses)\b/i.test(normalized)) {
+    aliasGroups.push(["flower", "flowers", "bouquet", "rose", "roses"]);
+  }
+
+  if (/\b(?:earbuds|headphones|earphones)\b/i.test(normalized)) {
+    aliasGroups.push([
+      "earbuds",
+      "earphones",
+      "headphones",
+      "headset",
+      "wireless",
+    ]);
+  }
+
+  if (/\b(?:phone|phones|mobile|smartphone)\b/i.test(normalized)) {
+    aliasGroups.push(["phone", "phones", "mobile", "smartphone"]);
+  }
+
+  if (/\b(?:perfume|fragrance|cologne)\b/i.test(normalized)) {
+    aliasGroups.push(["perfume", "fragrance", "cologne"]);
+  }
+
+  return aliasGroups.flat();
+}
+
+function productMatchesStrictRequest(product: ProductLike, message: string) {
+  const aliases = strictRequestAliases(message);
+
+  if (aliases.length === 0) return true;
+
+  const productText = productTextForRanking(product).toLowerCase();
+  const asksForWatch = /\b(?:watch|watches|wristwatch|smartwatch)\b/i.test(
+    message
+  );
+  const asksForWatchAccessory =
+    /\b(?:box|case|strap|band|charger|protector|stand|holder|storage|display)\b/i.test(
+      message
+    );
+
+  if (
+    asksForWatch &&
+    !asksForWatchAccessory &&
+    /\b(?:storage box|display box|watch box|case|strap|band|charger|protector|holder|stand|cell watch display|sunglasses)\b/i.test(
+      productText
+    )
+  ) {
+    return false;
+  }
+
+  return aliases.some((alias) =>
+    new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(
+      productText
+    )
+  );
+}
+
+function sharedRequestTokens(product: ProductLike, message: string) {
+  const requestTokens = new Set([
+    ...tokenizeForRanking(message),
+    ...strictRequestAliases(message),
+  ]);
+  const productTokens = new Set(tokenizeForRanking(productTextForRanking(product)));
+
+  return [...requestTokens].filter((token) => productTokens.has(token));
+}
+
 function scoreProductForAgent(
   product: ProductLike,
   message: string,
   memory: AgentMemory
 ): ProductRankingSignal {
   const reasons: string[] = [];
-  const normalized = `${message} ${product.name} ${product.description || ""} ${
-    product.brand || ""
-  } ${product.category || ""}`.toLowerCase();
+  const normalized = productTextForRanking(product).toLowerCase();
   const budget = extractBudget(message, memory);
+  const sharedTokens = sharedRequestTokens(product, message);
   let score = 50;
+
+  if (sharedTokens.length > 0) {
+    score += Math.min(18, sharedTokens.length * 4);
+    reasons.push("matches request");
+  } else {
+    score -= 35;
+    reasons.push("weak request match");
+  }
 
   if (product.price !== null && budget) {
     if (product.price <= budget) {
-      score += 20;
+      const budgetUse = product.price / budget;
+      score += budgetUse >= 0.45 && budgetUse <= 0.95 ? 24 : 16;
       reasons.push("inside budget");
     } else {
-      score -= 18;
+      const overBudgetRatio = product.price / budget;
+      score -= overBudgetRatio > 1.4 ? 28 : 18;
       reasons.push("over budget");
     }
+  }
+
+  if (
+    product.price !== null &&
+    typeof product.compareAtPrice === "number" &&
+    product.compareAtPrice > product.price
+  ) {
+    const discount = (product.compareAtPrice - product.price) / product.compareAtPrice;
+    score += Math.min(10, discount * 30);
+    reasons.push("discounted");
   }
 
   if (product.inStock === true) {
@@ -1463,6 +2140,11 @@ function scoreProductForAgent(
   } else if (product.inStock === false) {
     score -= 20;
     reasons.push("out of stock");
+  }
+
+  if (product.freeShipping) {
+    score += 5;
+    reasons.push("delivery value");
   }
 
   if (typeof product.rating === "number" && product.rating > 0) {
@@ -1500,6 +2182,10 @@ function scoreProductForAgent(
 
   if (product.productUrl) score += 5;
   if (product.imageUrl) score += 5;
+  if (product.description && product.description.length > 80) {
+    score += 4;
+    reasons.push("clear details");
+  }
 
   return {
     productId: product.id,
@@ -1513,7 +2199,20 @@ function rankProductsForAgent(
   message: string,
   memory: AgentMemory
 ) {
-  const ranked = products.map((product) => ({
+  const uniqueProducts = [
+    ...new Map(
+      products.map((product) => [
+        product.name.toLowerCase().replace(/\s+/g, " ").trim(),
+        product,
+      ])
+    ).values(),
+  ];
+  const relevantProducts = uniqueProducts.filter((product) =>
+    productMatchesStrictRequest(product, message)
+  );
+  const sourceProducts =
+    relevantProducts.length > 0 ? relevantProducts : uniqueProducts;
+  const ranked = sourceProducts.map((product) => ({
     product,
     ranking: scoreProductForAgent(product, message, memory),
   }));
@@ -1534,24 +2233,24 @@ function buildAgentState({
   traceId,
   message,
   memory,
+  plan,
   response,
   products,
   ranking,
   tools,
   startedAt,
-  history,
 }: {
   traceId: string;
   message: string;
   memory: AgentMemory;
+  plan: ReturnType<typeof buildAgentPlan>;
   response?: GroqResponse;
   products: ProductLike[];
   ranking: ProductRankingSignal[];
   tools: AgentToolCall[];
   startedAt: number;
-  history: ChatHistoryMessage[];
 }): AgentState {
-  const intent = inferAgentIntent(message, history);
+  const intent = plan.intent;
   const memoryPatch = buildMemoryPatch(message, memory, products.length > 0);
   const steps = buildAgentSteps(intent, response, products.length);
   const currentStep =
@@ -1576,12 +2275,14 @@ function buildAgentState({
 
   const agentState: AgentState = {
     traceId,
-    goal: inferGoal(message, intent),
+    goal: plan.goal,
     intent,
     currentStep,
     steps,
+    plannedActions: plan.actions,
     tools,
     memoryPatch,
+    memoryNotes: plan.memoryNotes,
     ranking,
     humanReviewRequired,
     observations,
@@ -1607,41 +2308,39 @@ function wantsProductCards(
   response: GroqResponse
 ) {
   if (!calledTool(response, "kapruka_search_products")) return false;
-
-  const normalized = message
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s.'-]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const asksToBrowse =
-    /\b(?:find|show|recommend|suggest|search|browse|compare|shop|buy|purchase|looking for|look for|options?|choices?|shortlist|best|top|available)\b/i.test(
-      normalized
-    ) ||
-    /\b(?:i need|i want|give me|get me|help me (?:find|choose|pick)|hoyala|pennanna|balanna)\b/i.test(
-      normalized
-    );
-
-  if (asksToBrowse) return true;
-
-  const asksForDifferentResults =
-    /\b(?:more|others?|another|alternatives?|cheaper|budget|premium|similar|different|else)\b/i.test(
-      normalized
-    );
-  const hasShoppingContext = history
-    .slice(-4)
-    .some(
-      (item) =>
-        item.role === "assistant" &&
-        /\b(?:pick|option|product|price|budget|rs\.?|lkr|cart)\b/i.test(
-          item.content
-        )
-    );
-
-  return asksForDifferentResults && hasShoppingContext;
+  return clearlyAsksForProductSearch(message, history);
 }
 
-function buildSystemPrompt(isRetry: boolean) {
+function formatMemoryForPrompt(memory: AgentMemory, plan: ReturnType<typeof buildAgentPlan>) {
+  const lines = [
+    ...plan.memoryNotes.map((note) => `- ${note}`),
+  ];
+
+  if (lines.length === 0) {
+    return "- No stable preference memory yet. Learn gently from this turn.";
+  }
+
+  return lines.join("\n");
+}
+
+function formatPlanForPrompt(plan: ReturnType<typeof buildAgentPlan>) {
+  return plan.actions
+    .map((action, index) => {
+      const toolText = action.toolName ? ` using ${action.toolName}` : "";
+      const confirmationText = action.needsConfirmation
+        ? " before asking for confirmation"
+        : "";
+
+      return `${index + 1}. ${action.label}${toolText}${confirmationText}`;
+    })
+    .join("\n");
+}
+
+function buildSystemPrompt(
+  isRetry: boolean,
+  memory: AgentMemory,
+  plan: ReturnType<typeof buildAgentPlan>
+) {
   return `
 You are Kapruka AI Concierge, a Sri Lankan AI marketplace shopping assistant.
 
@@ -1656,13 +2355,20 @@ Core customer model:
 
 Personality and voice:
 - You are Kapruka Scout: a sharp, modern Sri Lankan shopping companion, not a customer-support script or a product catalogue.
-- Feel like a familiar, trustworthy friend who happens to be excellent at shopping. Be present in the conversation before trying to sell anything.
+- Feel like a familiar, trustworthy best friend who happens to be excellent at shopping. Be present in the conversation before trying to sell anything.
 - Sound warm, relaxed, confident, and observant. React to what the user actually said instead of jumping straight into a search.
 - Use current, natural language such as "solid pick", "worth it", "skip this one", or "my pick" when it fits. Never force slang.
 - Be lightly witty, never loud, childish, overexcited, or try-hard. Do not call the user "bestie", "bro", or "queen" unless they establish that tone first.
+- Do not use emoji.
 - Give a point of view. Lead with the verdict, then the reason. Say which option you would choose and what tradeoff the user is making.
 - Use short, conversational sentences and contractions. Vary sentence length naturally; do not make every reply follow the same template.
 - Notice and reuse details from the recent conversation: budget, recipient, occasion, city, date, style, brand, size, and dislikes. Do not ask for information the user already gave.
+- If the user says they are having a bad day, feeling low, stressed, tired, angry, lonely, bored, or overwhelmed, respond like a close friend first. Do not mention shopping, products, or Kapruka unless they bring it back there.
+- For emotional small talk, avoid polished therapy-speak. Good: "Ah damn, that sounds rough. Want to dump it here for a minute?" Bad: "I'm sorry to hear you're experiencing difficulties."
+- When using memory, do it like a friend noticing context, not like a database report. Good: "Since you were keeping it around Rs. 10,000..." Bad: "Based on your stored preference..."
+- If memory may be stale or sensitive, phrase it softly: "Want me to use Kandy again?" or "Still keeping it under Rs. 10,000?"
+- Never state remembered budget, city, recipient, occasion, or delivery need as current fact unless the user mentioned it in the current message or clearly asked to reuse previous context with words like "same", "again", "more like that", or "keep it".
+- For a new gift/person/occasion, treat old memory as a quiet preference signal only. Do not say "Since you're looking to spend..." or "need it delivered to..." unless it came from the current user message.
 - When the user is unsure, reduce the decision to one easy choice instead of returning a questionnaire.
 - Match the user's energy. Keep quick questions quick; become more detailed only when the decision needs it.
 - Small talk, opinions, uncertainty, jokes, thanks, and casual conversation deserve normal human replies with no product pitch.
@@ -1672,7 +2378,6 @@ Personality and voice:
 - Avoid corporate phrases like "memorable birthday celebration", "delightful experience", "perfect choice", unless truly natural.
 - Avoid service-desk phrases like "How may I assist you?", "Please provide", and "I apologize for the inconvenience".
 - Do not open every reply with "Sure", "Certainly", "Of course", or the user's name.
-- Use at most one emoji in a reply, and only when it adds tone.
 - Do not end with generic inspirational advice.
 - Do not force a question or call to action at the end. End naturally unless one focused next step would genuinely help.
 
@@ -1699,14 +2404,17 @@ Language matching rules:
 
 Shopping rules:
 - Use Kapruka tools for product search, product details, categories, delivery cities, and delivery availability.
+- Follow the internal plan below, but adapt if the user's message clearly changes the job.
 - Product cards are a visual aid, not the default response.
 - Do not call product search tools for greetings, thanks, small talk, opinions, emotional conversation, general advice, or unclear messages. Reply naturally.
 - If the user is exploring an idea but has not asked to see products yet, discuss it or ask one useful question before searching.
+- If the user says they have no idea what to give someone, do not immediately list products. First give 2-3 thoughtful gift directions based on the relationship and ask one natural question about style, budget, or delivery timing.
 - Search only when the user clearly asks to find, browse, compare, recommend, shortlist, or buy products, or asks for more/different results from an existing search.
 - A question about a previously shown item should usually get a direct answer, not the same product list again.
 - Never invent product names, prices, stock, delivery availability, product URLs, images, or checkout links.
 - Search the full marketplace. Do not steer ordinary requests toward gifts, cakes, flowers, or hampers.
 - Assume the user is buying for themselves unless they indicate otherwise.
+- Do not invent a recipient. If the user asks for flowers but does not say who they are for, say "flower options" or "these flowers", not "for your sister/mother/wife".
 - For electronics, consider specifications, compatibility, warranty, brand, and practical value when data is available.
 - For groceries and essentials, consider quantity, pack size, unit value, availability, and delivery practicality when data is available.
 - For fashion, ask about size, fit, style, or intended use when necessary.
@@ -1714,6 +2422,8 @@ Shopping rules:
 - Products may come from third-party sellers. Do not imply Kapruka directly manufactures or sells every item, and do not invent seller ratings or guarantees.
 - If user gives budget, respect it.
 - If user gives city/date, check delivery when possible.
+- If the user asks to add to cart, buy, checkout, pay, or order, pause for explicit confirmation before taking or implying a purchase action.
+- Never pretend checkout/payment/cart mutation happened unless the UI or checkout endpoint actually did it.
 - If important details are missing, ask one short follow-up question.
 - Do not create an order. Checkout will be handled later after explicit user confirmation.
 - For the demo, checkout ends when the guest-checkout payment link is generated. Never ask for card details, suggest test card data, or claim that payment was completed.
@@ -1743,6 +2453,15 @@ Search quality rules:
 - Only when the user asked to browse or compare products, list them in this exact format so the UI can create product cards:
   1. Product Name - Rs. 2990
      Reason: short reason here
+
+Internal agent plan for this turn:
+Intent: ${plan.intent}
+Goal: ${plan.goal}
+Actions:
+${formatPlanForPrompt(plan)}
+
+Useful memory for this turn:
+${formatMemoryForPrompt(memory, plan)}
 
 Critical MCP tool argument rules:
 - Use native JSON types only.
@@ -1817,8 +2536,26 @@ function parseLocation(value: unknown): LocationContext | null {
   };
 }
 
-function buildUserMessage(message: string, location: LocationContext | null) {
-  if (!location) return message;
+function buildUserMessage(
+  message: string,
+  location: LocationContext | null,
+  memory: AgentMemory,
+  plan: ReturnType<typeof buildAgentPlan>,
+  forceProductSearch = false
+) {
+  const searchInstruction = forceProductSearch
+    ? `
+
+Important: This is a product-search turn. You must call kapruka_search_products with response_format "json" before replying. Do not answer from general knowledge only.`
+    : "";
+  const memoryText = plan.memoryNotes.length
+    ? `
+
+Quiet memory context to consider naturally:
+${formatMemoryForPrompt(memory, plan)}`
+    : "";
+
+  if (!location) return `${message}${searchInstruction}${memoryText}`;
 
   const accuracyText =
     location.accuracy === null
@@ -1828,14 +2565,17 @@ function buildUserMessage(message: string, location: LocationContext | null) {
   return `${message}
 
 Approximate browser location context: latitude ${location.latitude}, longitude ${location.longitude}.${accuracyText}
-Use this only for broad recommendation context. Ask the user to confirm their delivery city before making delivery claims.`;
+Use this only for broad recommendation context. Ask the user to confirm their delivery city before making delivery claims.${searchInstruction}${memoryText}`;
 }
 
 async function callGroq(
   message: string,
   isRetry: boolean,
   location: LocationContext | null,
-  history: ChatHistoryMessage[]
+  history: ChatHistoryMessage[],
+  memory: AgentMemory,
+  plan: ReturnType<typeof buildAgentPlan>,
+  forceProductSearch = false
 ) {
   return fetch("https://api.groq.com/openai/v1/responses", {
     method: "POST",
@@ -1849,12 +2589,18 @@ async function callGroq(
       input: [
         {
           role: "system",
-          content: buildSystemPrompt(isRetry),
+          content: buildSystemPrompt(isRetry, memory, plan),
         },
         ...history,
         {
           role: "user",
-          content: buildUserMessage(message, location),
+          content: buildUserMessage(
+            message,
+            location,
+            memory,
+            plan,
+            forceProductSearch
+          ),
         },
       ],
       tools: [
@@ -1878,6 +2624,195 @@ async function callGroq(
       ],
     }),
   });
+}
+
+function wantsGeminiForPlan(plan: ReturnType<typeof buildAgentPlan>) {
+  return (
+    process.env.LLM_PROVIDER === "gemini" &&
+    !plan.actions.some((action) => action.toolName)
+  );
+}
+
+function planNeedsProductSearch(plan: ReturnType<typeof buildAgentPlan>) {
+  return plan.actions.some((action) => action.id === "searchProducts");
+}
+
+function formatProductsForGemini(products: ProductLike[]) {
+  return products.map((product, index) => ({
+    index: index + 1,
+    name: product.name,
+    price: product.price,
+    currency: product.currency,
+    inStock: product.inStock,
+    rating: product.rating,
+    reviewCount: product.reviewCount,
+    category: product.category,
+    productUrl: product.productUrl,
+    rankingReason: product.rankingReason,
+  }));
+}
+
+async function callGemini(
+  message: string,
+  location: LocationContext | null,
+  history: ChatHistoryMessage[],
+  memory: AgentMemory,
+  plan: ReturnType<typeof buildAgentPlan>
+) {
+  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is missing in .env.local");
+  }
+
+  const result = await generateText({
+    model: google(process.env.GEMINI_MODEL || "gemini-2.5-flash"),
+    system: buildSystemPrompt(false, memory, plan),
+    messages: [
+      ...history.map((item) => ({
+        role: item.role,
+        content: item.content,
+      })),
+      {
+        role: "user" as const,
+        content: buildUserMessage(message, location, memory, plan),
+      },
+    ],
+    maxOutputTokens: 450,
+  });
+
+  return result.text.trim();
+}
+
+async function callGeminiWithProducts(
+  message: string,
+  location: LocationContext | null,
+  history: ChatHistoryMessage[],
+  memory: AgentMemory,
+  plan: ReturnType<typeof buildAgentPlan>,
+  products: ProductLike[]
+) {
+  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is missing in .env.local");
+  }
+
+  const productContext = JSON.stringify(formatProductsForGemini(products));
+  const result = await generateText({
+    model: google(process.env.GEMINI_MODEL || "gemini-2.5-flash"),
+    system: `${buildSystemPrompt(false, memory, plan)}
+
+You already have live Kapruka product search results in the user message.
+Reply like a helpful shopping buddy. Keep it short and natural.
+Do not invent products, prices, delivery cities, budgets, recipients, discounts, or availability.
+If products exist, do not mention individual product names or prices unless the user asks for a comparison.
+The UI will render product cards separately. Your reply should be one or two short chat bubbles worth of text, like "I found a few real Kapruka options. I ranked the best matches first."
+Do not use emoji.`,
+    messages: [
+      ...history.map((item) => ({
+        role: item.role,
+        content: item.content,
+      })),
+      {
+        role: "user" as const,
+        content: `${buildUserMessage(message, location, memory, plan)}
+
+Live Kapruka products returned by kapruka_search_products:
+${productContext}`,
+      },
+    ],
+    maxOutputTokens: 350,
+  });
+
+  return result.text.trim();
+}
+
+async function callGeminiWithDelivery(
+  message: string,
+  location: LocationContext | null,
+  history: ChatHistoryMessage[],
+  memory: AgentMemory,
+  plan: ReturnType<typeof buildAgentPlan>,
+  delivery: Awaited<ReturnType<typeof checkKaprukaDeliveryDirect>>
+) {
+  if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) {
+    throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is missing in .env.local");
+  }
+
+  const result = await generateText({
+    model: google(process.env.GEMINI_MODEL || "gemini-2.5-flash"),
+    system: `${buildSystemPrompt(false, memory, plan)}
+
+You already have a live Kapruka delivery result in the user message.
+Answer from that result only. Do not invent delivery fees, dates, cities, or availability.
+Keep it short and direct, like a real chat reply.
+End with a complete sentence. Do not use emoji.`,
+    messages: [
+      ...history.map((item) => ({
+        role: item.role,
+        content: item.content,
+      })),
+      {
+        role: "user" as const,
+        content: `${buildUserMessage(message, location, memory, plan)}
+
+Live Kapruka delivery result:
+${JSON.stringify(delivery)}`,
+      },
+    ],
+    maxOutputTokens: 450,
+  });
+
+  return result.text.trim();
+}
+
+function fallbackGeminiReply(
+  message: string,
+  plan: ReturnType<typeof buildAgentPlan>
+) {
+  if (isEmotionalSmallTalk(message)) {
+    return "Ah damn, that sounds rough. Want to dump it here for a minute? I'm listening.";
+  }
+
+  if (isVagueGiftIdeaRequest(message)) {
+    return "That's a nice problem to have. I'd first decide the vibe: romantic, useful, or something she can enjoy slowly. Tell me which one feels more like her and I'll narrow it down.";
+  }
+
+  if (plan.intent === "small_talk") {
+    const normalized = message.toLowerCase().trim();
+
+    if (/^(?:nothing|idk|i don't know|dont know|not sure|whatever|anything)$/i.test(normalized)) {
+      return "No worries. We can just chill here for a bit. Tell me anything, or say nothing.";
+    }
+
+    return "I'm here. Talk to me like normal. What's going on?";
+  }
+
+  return "I'm here. Tell me what you want to figure out and I'll keep it focused.";
+}
+
+function fallbackProductReply(productCount: number) {
+  if (productCount > 0) {
+    return `I found ${productCount} real Kapruka option${productCount === 1 ? "" : "s"} and ranked the best matches first.`;
+  }
+
+  return "I checked Kapruka, but I didn't find a clean match yet. Try naming the product category a bit more directly.";
+}
+
+function fallbackDeliveryReply(
+  delivery: Awaited<ReturnType<typeof checkKaprukaDeliveryDirect>>
+) {
+  if (delivery.available) {
+    const feeText =
+      typeof delivery.fee === "number"
+        ? ` The delivery fee is Rs. ${delivery.fee}.`
+        : "";
+
+    return `Yes, delivery to ${delivery.city} is available for ${delivery.checkedDate}.${feeText}`;
+  }
+
+  const earliestText = delivery.earliestDate
+    ? ` Earliest available date is ${delivery.earliestDate}.`
+    : "";
+
+  return `Delivery to ${delivery.city} is not available for ${delivery.checkedDate}.${earliestText}`;
 }
 
 function isPlainGreeting(message: string) {
@@ -1926,6 +2861,28 @@ export async function POST(req: Request) {
       sessionId,
     } = await req.json();
     const location = parseLocation(rawLocation);
+
+    if (!message || typeof message !== "string") {
+      return Response.json({ error: "Message is required" }, { status: 400 });
+    }
+
+    if (isPlainGreeting(message)) {
+      return Response.json({
+        reply: "Hey. I'm here. What's going on?",
+        products: [],
+        debug: [],
+      });
+    }
+
+    if (isOrderTrackingRequest(message) && !hasPlausibleOrderNumber(message)) {
+      return Response.json({
+        reply:
+          "Yep, I can check it. Send me the actual order number from your confirmation email or order-complete page - not the checkout reference - and I'll pull up the latest status.",
+        products: [],
+        debug: [],
+      });
+    }
+
     const clientMemory = parseAgentMemory(rawMemory);
     const databaseMemory =
       typeof sessionId === "string"
@@ -1951,9 +2908,7 @@ export async function POST(req: Request) {
           }))
       : [];
 
-    if (!message || typeof message !== "string") {
-      return Response.json({ error: "Message is required" }, { status: 400 });
-    }
+    const plan = buildAgentPlan(message, history, memory);
 
     if (isPlainGreeting(message)) {
       return Response.json({
@@ -1972,19 +2927,292 @@ export async function POST(req: Request) {
       });
     }
 
+    if (process.env.LLM_PROVIDER === "gemini" && plan.intent === "delivery") {
+      const city = extractDeliveryCity(message);
+
+      if (!city) {
+        const tools: AgentToolCall[] = [
+          {
+            name: "kapruka_check_delivery",
+            status: "skipped",
+            arguments: { reason: "delivery city missing" },
+          },
+        ];
+        const agentState = buildAgentState({
+          traceId,
+          message,
+          memory,
+          plan,
+          products: [],
+          ranking: [],
+          tools,
+          startedAt,
+        });
+        const displayReply =
+          "Tell me the delivery city and I’ll check the real Kapruka availability for you.";
+
+        await persistAgentRun({
+          sessionId: typeof sessionId === "string" ? sessionId : null,
+          userMessage: message,
+          assistantReply: displayReply,
+          agentState,
+          products: [],
+          latencyMs: Date.now() - startedAt,
+        });
+
+        return Response.json({
+          reply: displayReply,
+          products: [],
+          agentState,
+          debug: [{ type: "llm_provider", name: "gemini" }],
+        });
+      }
+
+      const deliveryStartedAt = Date.now();
+      const delivery = await checkKaprukaDeliveryDirect(city, message);
+      const tools: AgentToolCall[] = [
+        {
+          name: "kapruka_list_delivery_cities",
+          status: "called",
+          arguments: { query: city, limit: 10, response_format: "json" },
+        },
+        {
+          name: "kapruka_check_delivery",
+          status: "called",
+          latencyMs: Date.now() - deliveryStartedAt,
+          arguments: {
+            city: delivery.city,
+            delivery_date: delivery.checkedDate,
+            response_format: "json",
+          },
+        },
+      ];
+      let reply: string;
+
+      try {
+        reply = removeRoboticLines(await callGeminiWithDelivery(
+          message,
+          location,
+          history,
+          memory,
+          plan,
+          delivery
+        ));
+      } catch (error) {
+        console.warn("Gemini delivery reply failed, using fallback:", error);
+        reply = fallbackDeliveryReply(delivery);
+      }
+
+      const agentState = buildAgentState({
+        traceId,
+        message,
+        memory,
+        plan,
+        products: [],
+        ranking: [],
+        tools,
+        startedAt,
+      });
+      const displayReply = cleanReplyForUi(reply, 0);
+
+      await persistAgentRun({
+        sessionId: typeof sessionId === "string" ? sessionId : null,
+        userMessage: message,
+        assistantReply: displayReply,
+        agentState,
+        products: [],
+        latencyMs: Date.now() - startedAt,
+      });
+
+      return Response.json({
+        reply: displayReply,
+        products: [],
+        agentState,
+        debug: [
+          { type: "llm_provider", name: "gemini" },
+          { type: "mcp_call", name: "kapruka_check_delivery" },
+        ],
+      });
+    }
+
+    if (process.env.LLM_PROVIDER === "gemini" && planNeedsProductSearch(plan)) {
+      const searchStartedAt = Date.now();
+      const searchQuery = buildSearchQuery(message, memory);
+      let searchStatus: AgentToolCall["status"] = "called";
+      let productsFromMcp: ProductLike[] = [];
+
+      try {
+        productsFromMcp = await searchKaprukaProductsDirect(message, memory);
+      } catch (error) {
+        searchStatus = "failed";
+        console.warn("Kapruka direct product search failed:", error);
+      }
+
+      const enrichedProducts = await enrichProductsWithMetadata(productsFromMcp);
+      const ranked = rankProductsForAgent(enrichedProducts, message, memory);
+      const products = ranked.products.slice(0, PRODUCT_CARD_LIMIT);
+      const ranking = rankProductsForAgent(products, message, memory).ranking;
+      const tools: AgentToolCall[] = [
+        {
+          name: "kapruka_search_products",
+          status: searchStatus,
+          latencyMs: Date.now() - searchStartedAt,
+          arguments: {
+            q: searchQuery,
+            limit: SEARCH_RESULT_LIMIT,
+            max_price: extractBudget(message, memory) ?? null,
+            response_format: "json",
+          },
+        },
+      ];
+      let reply: string;
+
+      try {
+        reply = removeRoboticLines(await callGeminiWithProducts(
+          message,
+          location,
+          history,
+          memory,
+          plan,
+          products
+        ));
+      } catch (error) {
+        console.warn("Gemini product reply failed, using fallback:", error);
+        reply = fallbackProductReply(products.length);
+      }
+
+      const agentState = buildAgentState({
+        traceId,
+        message,
+        memory,
+        plan,
+        products,
+        ranking,
+        tools,
+        startedAt,
+      });
+      const displayReply = cleanReplyForUi(reply, products.length);
+
+      await persistAgentRun({
+        sessionId: typeof sessionId === "string" ? sessionId : null,
+        userMessage: message,
+        assistantReply: displayReply,
+        agentState,
+        products,
+        latencyMs: Date.now() - startedAt,
+      });
+
+      console.log(
+        "Gemini + Kapruka products sent to UI:",
+        products.map((product) => ({
+          name: product.name,
+          price: product.price,
+          rating: product.rating,
+          reviewCount: product.reviewCount,
+          imageUrl: product.imageUrl,
+          productUrl: product.productUrl,
+        }))
+      );
+
+      return Response.json({
+        reply: displayReply,
+        products,
+        agentState,
+        debug: [
+          { type: "llm_provider", name: "gemini" },
+          { type: "mcp_call", name: "kapruka_search_products" },
+        ],
+      });
+    }
+
+    if (wantsGeminiForPlan(plan)) {
+      let reply: string;
+
+      try {
+        reply = removeRoboticLines(
+          await callGemini(message, location, history, memory, plan)
+        );
+      } catch (error) {
+        console.warn("Gemini chat reply failed, using fallback:", error);
+        reply = fallbackGeminiReply(message, plan);
+      }
+
+      const agentState = buildAgentState({
+        traceId,
+        message,
+        memory,
+        plan,
+        products: [],
+        ranking: [],
+        tools: [],
+        startedAt,
+      });
+      const displayReply = cleanReplyForUi(reply, 0);
+
+      await persistAgentRun({
+        sessionId: typeof sessionId === "string" ? sessionId : null,
+        userMessage: message,
+        assistantReply: displayReply,
+        agentState,
+        products: [],
+        latencyMs: Date.now() - startedAt,
+      });
+
+      return Response.json({
+        reply: displayReply,
+        products: [],
+        agentState,
+        debug: [{ type: "llm_provider", name: "gemini" }],
+      });
+    }
+
     if (!process.env.GROQ_API_KEY) {
       return Response.json(
-        { error: "GROQ_API_KEY is missing in .env.local" },
+        {
+          error: "GROQ_API_KEY is missing in .env.local",
+        },
         { status: 500 }
       );
     }
 
-    let groqResponse = await callGroq(message, false, location, history);
+    let groqResponse = await callGroq(
+      message,
+      false,
+      location,
+      history,
+      memory,
+      plan
+    );
     let data = (await groqResponse.json()) as GroqResponse;
 
     if (!groqResponse.ok && data.error?.code === "tool_use_failed") {
       console.warn("Retrying Groq MCP call with stricter JSON typing...");
-      groqResponse = await callGroq(message, true, location, history);
+      groqResponse = await callGroq(
+        message,
+        true,
+        location,
+        history,
+        memory,
+        plan
+      );
+      data = (await groqResponse.json()) as GroqResponse;
+    }
+
+    if (
+      groqResponse.ok &&
+      planNeedsProductSearch(plan) &&
+      !calledTool(data, "kapruka_search_products")
+    ) {
+      console.warn("Retrying Groq MCP call because product search was skipped...");
+      groqResponse = await callGroq(
+        message,
+        true,
+        location,
+        history,
+        memory,
+        plan,
+        true
+      );
       data = (await groqResponse.json()) as GroqResponse;
     }
 
@@ -2012,7 +3240,7 @@ export async function POST(req: Request) {
       ? await enrichProductsWithMetadata(mergedProducts).then((items) => {
           const ranked = rankProductsForAgent(items, message, memory);
 
-          return ranked.products.slice(0, 5);
+          return ranked.products.slice(0, PRODUCT_CARD_LIMIT);
         })
       : [];
     const ranking = rankProductsForAgent(products, message, memory).ranking;
@@ -2021,12 +3249,12 @@ export async function POST(req: Request) {
       traceId,
       message,
       memory,
+      plan,
       response: data,
       products,
       ranking,
       tools,
       startedAt,
-      history,
     });
 
     const displayReply = cleanReplyForUi(reply, products.length);

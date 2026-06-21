@@ -20,9 +20,106 @@ function textChunks(value: string) {
   return value.match(/\S+\s*/g) || [];
 }
 
+function messageParts(value: string) {
+  const parts = value
+    .split(/\n{2,}|\n+|(?<=[.!?])\s+(?=[\p{Lu}\p{Lt}\p{Lo}"'(])/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts : [value.trim()].filter(Boolean);
+}
+
+function fastCasualReply(message: unknown) {
+  if (typeof message !== "string") return null;
+
+  const normalized = message
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (
+    /^(?:hi|hello|hey|helo|hii|hiii|yo|sup|good morning|good afternoon|good evening|ayubowan|vanakkam|thanks|thank you|thx|ok|okay)$/.test(
+      normalized
+    )
+  ) {
+    if (/^(?:thanks|thank you|thx)$/.test(normalized)) {
+      return "Anytime. I got you.";
+    }
+
+    if (/^(?:ok|okay)$/.test(normalized)) {
+      return "Cool. I'm here if you want to keep talking.";
+    }
+
+    if (normalized === "good morning") {
+      return "Morning. How's the day starting?";
+    }
+
+    if (normalized === "good afternoon") {
+      return "Afternoon. What's happening?";
+    }
+
+    if (normalized === "good evening") {
+      return "Evening. Long day?";
+    }
+
+    if (normalized === "yo" || normalized === "sup") {
+      return "Yo. What's up?";
+    }
+
+    if (normalized === "ayubowan") {
+      return "Ayubowan. Mama innawa, kiyanna.";
+    }
+
+    if (normalized === "vanakkam") {
+      return "Vanakkam. Tell me.";
+    }
+
+    return "Hey. I'm here. What's going on?";
+  }
+
+  return null;
+}
+
 export async function POST(req: Request) {
   const payload = await req.json();
   const textId = `assistant-${Date.now().toString(36)}`;
+  const quickReply = fastCasualReply(payload?.message);
+
+  if (quickReply) {
+    return createUIMessageStreamResponse({
+      stream: createUIMessageStream({
+        async execute({ writer }) {
+        writer.write({
+          type: "text-start",
+          id: textId,
+        });
+
+        for (const chunk of textChunks(quickReply)) {
+            writer.write({
+              type: "text-delta",
+              id: textId,
+              delta: chunk,
+            });
+            await wait(45);
+          }
+
+          writer.write({
+            type: "text-end",
+            id: textId,
+          });
+          writer.write({
+            type: "data-result",
+            data: {
+              products: [],
+              agentState: undefined,
+            },
+          });
+        },
+      }),
+    });
+  }
+
   const cookieStore = await cookies();
   const headerStore = await headers();
   const sessionToken =
@@ -43,14 +140,12 @@ export async function POST(req: Request) {
       async execute({ writer }) {
         writer.write({
           type: "data-progress",
-          data: { label: "Understanding the shopping goal" },
+          data: { label: "Figuring out what matters here" },
         });
-
-        await wait(80);
 
         writer.write({
           type: "data-progress",
-          data: { label: "Calling Kapruka commerce tools" },
+          data: { label: "Checking the right Kapruka shelves" },
         });
 
         const response = await fetch(new URL("/api/chat", req.url), {
@@ -78,23 +173,41 @@ export async function POST(req: Request) {
 
         writer.write({
           type: "data-progress",
-          data: { label: "Ranking price, stock, and fit" },
+          data: { label: "Comparing value, stock, and fit" },
         });
 
-        await wait(60);
+        const parts = messageParts(data.reply || "");
 
-        writer.write({
-          type: "text-start",
-          id: textId,
-        });
+        for (const [partIndex, part] of parts.entries()) {
+          if (partIndex > 0) {
+            writer.write({
+              type: "data-message-break",
+              data: {},
+            });
+            await wait(420);
+          }
 
-        for (const chunk of textChunks(data.reply || "")) {
+          if (partIndex === 0) {
+            writer.write({
+              type: "text-start",
+              id: textId,
+            });
+          }
+
+          for (const chunk of textChunks(part)) {
+            writer.write({
+              type: "text-delta",
+              id: textId,
+              delta: chunk,
+            });
+          }
+        }
+
+        if (parts.length === 0) {
           writer.write({
-            type: "text-delta",
+            type: "text-start",
             id: textId,
-            delta: chunk,
           });
-          await wait(12);
         }
 
         writer.write({

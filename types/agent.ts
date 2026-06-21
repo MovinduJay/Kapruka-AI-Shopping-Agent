@@ -15,6 +15,21 @@ export type AgentStep = {
   status: AgentStepStatus;
 };
 
+export type AgentAction = {
+  id:
+    | "reply"
+    | "searchProducts"
+    | "getProductDetails"
+    | "compareProducts"
+    | "checkDelivery"
+    | "prepareCart"
+    | "prepareCheckout"
+    | "trackOrder";
+  label: string;
+  toolName?: string;
+  needsConfirmation?: boolean;
+};
+
 export type AgentToolCall = {
   name: string;
   status: "called" | "skipped" | "failed";
@@ -49,8 +64,10 @@ export type AgentState = {
     | "order_tracking";
   currentStep: AgentStep["id"];
   steps: AgentStep[];
+  plannedActions?: AgentAction[];
   tools: AgentToolCall[];
   memoryPatch?: AgentMemory;
+  memoryNotes?: string[];
   ranking?: ProductRankingSignal[];
   humanReviewRequired: boolean;
   observations: string[];

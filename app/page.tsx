@@ -42,7 +42,9 @@ type ChatMessage = {
 type ChatStreamPart = {
   type: string;
   delta?: string;
-  data?: Pick<AgentChatResponse, "products" | "agentState">;
+  data?: Pick<AgentChatResponse, "products" | "agentState"> & {
+    label?: string;
+  };
   errorText?: string;
 };
 
@@ -129,10 +131,9 @@ function mergeAgentMemory(
 }
 
 function splitAssistantContent(content: string) {
-  return content
-    .split(/\n+|(?<=[.!?])\s+(?=[\p{Lu}\p{Lt}\p{Lo}"'(])/u)
-    .map((part) => part.trim())
-    .filter(Boolean);
+  const trimmed = content.trim();
+
+  return trimmed ? [trimmed] : [];
 }
 
 function parseSseEvents(buffer: string) {
@@ -170,6 +171,7 @@ export default function Home() {
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [activeProgressSteps, setActiveProgressSteps] = useState<string[]>([]);
   const [chatStarted, setChatStarted] = useState(false);
   const [cart, setCart] = useState<ProductCardType[]>([]);
   const [selectedProduct, setSelectedProduct] =
@@ -192,6 +194,11 @@ export default function Home() {
   useEffect(() => {
     document.documentElement.style.colorScheme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    window.localStorage.removeItem(agentMemoryKey);
+    window.localStorage.removeItem(agentRunsKey);
+  }, []);
 
   useEffect(() => {
     const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
@@ -306,6 +313,7 @@ export default function Home() {
 
     setInput("");
     setLoading(true);
+    setActiveProgressSteps(["Reading the request"]);
 
     try {
       const memory = loadAgentMemory();
@@ -378,6 +386,23 @@ export default function Home() {
           });
         }
 
+        if (part.type === "data-message-break") {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content: "",
+              products: [],
+            },
+          ]);
+        }
+
+        if (part.type === "data-progress" && part.data?.label) {
+          setActiveProgressSteps((prev) =>
+            [...new Set([...prev, part.data!.label!])].slice(-4)
+          );
+        }
+
         if (part.type === "error") {
           throw new Error(part.errorText || "Chat stream failed");
         }
@@ -439,6 +464,7 @@ export default function Home() {
       });
     } finally {
       setLoading(false);
+      setActiveProgressSteps([]);
     }
   }
 
@@ -459,6 +485,60 @@ export default function Home() {
     }
 
     return latestUserMessage;
+  }
+
+  function assistantGroupContent(messageIndex: number) {
+    let startIndex = messageIndex;
+
+    while (
+      startIndex > 0 &&
+      messages[startIndex - 1]?.role === "assistant"
+    ) {
+      startIndex -= 1;
+    }
+
+    const parts: string[] = [];
+
+    for (let index = startIndex; index < messages.length; index += 1) {
+      const message = messages[index];
+
+      if (message.role !== "assistant") break;
+
+      if (message.content.trim()) {
+        parts.push(message.content.trim());
+      }
+
+      if (index >= messageIndex) break;
+    }
+
+    return parts.join("\n\n");
+  }
+
+  function assistantGroupProducts(messageIndex: number) {
+    let startIndex = messageIndex;
+
+    while (
+      startIndex > 0 &&
+      messages[startIndex - 1]?.role === "assistant"
+    ) {
+      startIndex -= 1;
+    }
+
+    let products: ProductCardType[] = [];
+
+    for (let index = startIndex; index < messages.length; index += 1) {
+      const message = messages[index];
+
+      if (message.role !== "assistant") break;
+
+      if (message.products?.length) {
+        products = message.products;
+      }
+
+      if (index >= messageIndex) break;
+    }
+
+    return products;
   }
 
   return (
@@ -530,28 +610,47 @@ export default function Home() {
           className="flex-1 overflow-y-auto"
           onScroll={(event) => updateComposerGlass(event.currentTarget)}
         >
-          <div className="mx-auto w-full max-w-6xl space-y-5 px-4 pb-40 pt-6 sm:px-6 sm:pb-44">
-            {messages.map((message, index) => (
+          <div className="mx-auto w-full max-w-6xl space-y-4 px-4 pb-40 pt-6 sm:px-6 sm:pb-44">
+            {messages.map((message, index) => {
+              const previousMessage = messages[index - 1];
+              const nextMessage = messages[index + 1];
+              const isGroupedAssistant =
+                message.role === "assistant" &&
+                previousMessage?.role === "assistant" &&
+                !previousMessage.products?.length;
+              const isLastAssistantInGroup =
+                message.role === "assistant" &&
+                nextMessage?.role !== "assistant";
+              const groupProducts =
+                message.role === "assistant" && isLastAssistantInGroup
+                  ? assistantGroupProducts(index)
+                  : [];
+              const shouldShowMessageActions =
+                message.role === "user" || isLastAssistantInGroup;
+              const hasVisibleProducts =
+                message.products?.length || groupProducts.length;
+
+              return (
               <div
                 key={index}
                 className={`flex ${
                   message.role === "user" ? "justify-end" : "justify-start"
-                }`}
+                } ${isGroupedAssistant ? "!mt-0.5" : ""}`}
               >
                 <div
                   className={
-                    message.products && message.products.length > 0
+                    hasVisibleProducts
                       ? "group/message w-full min-w-0"
                       : "group/message max-w-5xl"
                   }
                 >
                   {message.role === "assistant" ? (
-                    <div className="space-y-2">
+                    <div className="space-y-1.5">
                       {splitAssistantContent(message.content).map(
                         (part, partIndex) => (
                           <div
                             key={`${index}-${partIndex}`}
-                            className="w-fit max-w-2xl whitespace-pre-wrap rounded-[28px] rounded-bl-md border border-white/[0.06] bg-slate-800 px-5 py-3 text-lg leading-7 text-slate-100 shadow-sm"
+                            className="w-fit max-w-2xl whitespace-pre-wrap rounded-[28px] rounded-bl-md border border-white/[0.06] bg-slate-800 px-5 py-2.5 text-lg leading-7 text-slate-100 shadow-sm"
                           >
                             {part}
                           </div>
@@ -559,42 +658,52 @@ export default function Home() {
                       )}
                     </div>
                   ) : (
-                    <div className="ml-auto w-fit max-w-2xl whitespace-pre-wrap rounded-[28px] rounded-br-md bg-emerald-500 px-5 py-3 text-lg leading-7 text-white shadow-sm">
+                    <div className="ml-auto w-fit max-w-2xl whitespace-pre-wrap rounded-[28px] rounded-br-md bg-emerald-500 px-5 py-2.5 text-lg leading-7 text-white shadow-sm">
                       {message.content}
                     </div>
                   )}
 
-                  <div
-                    className={`pointer-events-none mt-1 flex h-7 gap-1.5 opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 ${
-                      message.role === "user" ? "justify-end" : "justify-start"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => copyMessage(message.content)}
-                      aria-label="Copy message"
-                      className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/10 hover:text-slate-200"
+                  {shouldShowMessageActions && (
+                    <div
+                      className={`pointer-events-none mt-0.5 flex h-5 gap-1.5 opacity-0 transition-opacity duration-150 group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100 ${
+                        message.role === "user"
+                          ? "justify-end"
+                          : "justify-start"
+                      }`}
                     >
-                      <Copy size={18} />
-                    </button>
-
-                    {message.role === "user" && (
                       <button
                         type="button"
-                        onClick={() => editUserMessage(message.content)}
-                        aria-label="Edit and resend message"
+                        onClick={() =>
+                          copyMessage(
+                            message.role === "assistant"
+                              ? assistantGroupContent(index)
+                              : message.content
+                          )
+                        }
+                        aria-label="Copy message"
                         className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/10 hover:text-slate-200"
                       >
-                        <Pencil size={18} />
+                        <Copy size={18} />
                       </button>
-                    )}
-                  </div>
+
+                      {message.role === "user" && (
+                        <button
+                          type="button"
+                          onClick={() => editUserMessage(message.content)}
+                          aria-label="Edit and resend message"
+                          className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/10 hover:text-slate-200"
+                        >
+                          <Pencil size={18} />
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {message.role === "assistant" &&
-                    message.products &&
-                    message.products.length > 0 && (
+                    isLastAssistantInGroup &&
+                    groupProducts.length > 0 && (
                       <ProductCarousel
-                        products={message.products}
+                        products={groupProducts}
                         cartProductIds={cart.map((item) => item.id)}
                         onAddToCart={addToCart}
                         onViewDetails={viewProductDetails}
@@ -605,10 +714,14 @@ export default function Home() {
                     )}
                 </div>
               </div>
-            ))}
+              );
+            })}
 
             {loading && (
-              <SearchProgress query={latestUserMessage} />
+              <SearchProgress
+                query={latestUserMessage}
+                steps={activeProgressSteps}
+              />
             )}
           </div>
         </div>

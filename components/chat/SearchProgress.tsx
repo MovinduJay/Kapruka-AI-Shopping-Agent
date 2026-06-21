@@ -7,6 +7,7 @@ const shoppingProgressSteps = [
 
 type Props = {
   query?: string;
+  steps?: string[];
 };
 
 function looksLikeShoppingQuery(query: string) {
@@ -19,8 +20,9 @@ function looksLikeShoppingQuery(query: string) {
   );
 }
 
-export function SearchProgress({ query = "" }: Props) {
+export function SearchProgress({ query = "", steps }: Props) {
   const isShoppingQuery = looksLikeShoppingQuery(query);
+  const visibleSteps = steps && steps.length > 0 ? steps : shoppingProgressSteps;
 
   return (
     <div
@@ -37,7 +39,7 @@ export function SearchProgress({ query = "" }: Props) {
 
         {isShoppingQuery && (
           <div className="grid min-w-0 overflow-hidden text-base text-slate-300">
-            {shoppingProgressSteps.map((step, index) => (
+            {visibleSteps.map((step, index) => (
               <p
                 key={step}
                 className="search-progress-step col-start-1 row-start-1 truncate"
