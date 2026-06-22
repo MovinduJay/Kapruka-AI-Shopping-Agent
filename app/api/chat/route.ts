@@ -80,6 +80,7 @@ type ProductPageMetadata = Pick<
   ProductLike,
   | "imageUrl"
   | "price"
+  | "compareAtPrice"
   | "inStock"
   | "description"
   | "rating"
@@ -258,8 +259,24 @@ function extractText(response: GroqResponse): string {
 }
 
 function cleanProductName(name: string) {
-  return name
+  const decodedNumericRuns = name.replace(
+    /(?:(?:&|n)?#\d+;){2,}/gi,
+    (run) => {
+      const bytes = [...run.matchAll(/#(\d+);/g)].map((match) =>
+        Number(match[1])
+      );
+
+      return bytes.every((byte) => byte >= 0 && byte <= 255)
+        ? new TextDecoder().decode(Uint8Array.from(bytes))
+        : run;
+    }
+  );
+
+  return decodedNumericRuns
     .replace(/\*\*/g, "")
+    .replace(/(?:&|n)?#(\d+);/gi, (_, code: string) =>
+      String.fromCodePoint(Number(code))
+    )
     .replace(/#226;/g, "'")
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
@@ -672,75 +689,184 @@ function productFromObject(obj: AnyRecord, index: number): ProductLike | null {
   };
 }
 
-function buildSearchQuery(message: string, memory: AgentMemory) {
-  const normalized = message.toLowerCase();
-  const terms = [message];
-
-  if (/\b(?:watch|watches|wristwatch|smartwatch)\b/i.test(normalized)) {
-    terms.push("watch watches wristwatch smartwatch analog digital");
-  }
-
-  if (/\b(?:flower|flowers|bouquet|rose|roses)\b/i.test(normalized)) {
-    terms.push("flowers bouquet arrangement");
-  }
-
-  if (/\b(?:earbuds|headphones|earphones)\b/i.test(normalized)) {
-    terms.push("earbuds headphones earphones wireless");
-  }
-
-  if (/\b(?:phone|phones|mobile)\b/i.test(normalized)) {
-    terms.push("phone mobile smartphone");
-  }
-
-  if (/\b(?:perfume|fragrance|cologne)\b/i.test(normalized)) {
-    terms.push("perfume fragrance cologne");
-  }
-
-  if (/\b(?:wife|girlfriend|anniversary|romantic|love)\b/i.test(normalized)) {
-    terms.push("romantic flowers chocolates gift");
-  }
-
-  if (/\b(?:birthday|bday)\b/i.test(normalized)) {
-    terms.push("birthday gift");
-  }
-
-  if (memory.favoriteCategories?.length) {
-    terms.push(memory.favoriteCategories.slice(0, 2).join(" "));
-  }
-
-  return terms
-    .join(" ")
-    .replace(/\b(?:need|want|some|please|pls|show|find|give me|get me|looking for|a|an|the)\b/gi, " ")
+function cleanSearchQuery(message: string) {
+  return message
+    .toLowerCase()
+    .replace(
+      /\b(?:under|below|less than|up to|max(?:imum)?|budget(?: of)?|around|about)\s*(?:rs\.?|lkr)?\s*[\d,]+(?:\.\d+)?\s*k?\b/gi,
+      " "
+    )
+    .replace(/\b(?:rs\.?|lkr)\s*[\d,]+(?:\.\d+)?\s*k?\b/gi, " ")
+    .replace(
+      /\b(?:please|pls|just|show me|show|find me|find|get me|give me|give|search for|search|browse for|browse|shop for|shop|looking for|look for|i need|i want|need|want|recommend me|recommend|suggest me|suggest|choose from|to choose|within)\b/gi,
+      " "
+    )
+    .replace(
+      /\b(?:do you have|have you got|have any|are there any|is there any|is there|do you sell|can i get|can i buy|available)\b/gi,
+      " "
+    )
+    .replace(/\b(?:some|any|options?|choices?|products?|items?|for me)\b/gi, " ")
+    .replace(/[^\p{L}\p{N}\s.'+-]/gu, " ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .slice(0, 200);
+}
+
+function recentShoppingContext(history: ChatHistoryMessage[]) {
+  return history
+    .slice()
+    .reverse()
+    .find(
+      (item) =>
+        item.role === "user" &&
+        /\b(?:gift|birthday|anniversary|mother|mom|mum|amma|father|dad|wife|husband|girlfriend|boyfriend|friend|flowers?|cakes?|hampers?|headphones?|earbuds?|watches?|phones?|laptops?|toys?|bags?|shoes?|groceries|rice cooker)\b/i.test(
+          item.content
+        )
+    )?.content;
+}
+
+function buildSearchQueries(
+  message: string,
+  memory: AgentMemory,
+  history: ChatHistoryMessage[] = []
+) {
+  const normalized = message.toLowerCase();
+  const isFollowUp =
+    /^(?:more|others?|another|alternatives?|cheaper|premium|similar|different|anything else|more like that)\b/i.test(
+      normalized.trim()
+    ) ||
+    /\b(?:options?|choices?)\b[\s\S]{0,35}\b(?:choose|within|under|below|budget|rs\.?|lkr|\d+\s*k)\b/i.test(
+      normalized
+    ) ||
+    /\b(?:just\s+)?(?:give|show)\b[\s\S]{0,20}\b(?:options?|choices?)\b/i.test(
+      normalized
+    );
+  const priorSearch = isFollowUp
+    ? memory.recentSearches?.[0] || recentShoppingContext(history)
+    : null;
+  const searchContext = priorSearch || message;
+  const combinedContext = `${searchContext} ${message}`.toLowerCase();
+  const cleaned = cleanSearchQuery(searchContext);
+  const queries = [cleaned];
+
+  const asksForGift =
+    /\b(?:gift|birthday|anniversary|mother|mom|mum|amma|father|dad|wife|husband|girlfriend|boyfriend)\b/i.test(
+      combinedContext
+    );
+
+  if (asksForGift) {
+    const recipient = /\b(?:mother|mom|mum|amma)\b/i.test(combinedContext)
+      ? "mother"
+      : /\b(?:father|dad)\b/i.test(combinedContext)
+        ? "father"
+        : null;
+    const occasion = /\bbirthday\b/i.test(combinedContext)
+      ? "birthday"
+      : /\banniversary\b/i.test(combinedContext)
+        ? "anniversary"
+        : null;
+    const recipientText = recipient ? ` for ${recipient}` : "";
+    const occasionText = occasion ? `${occasion} ` : "";
+
+    queries.splice(
+      0,
+      queries.length,
+      `${occasionText}gifts${recipientText}`,
+      `${occasionText}flowers`,
+      `gift hamper${recipientText}`
+    );
+  }
+
+  // Kapruka search performs best with one concise product phrase per call.
+  // Synonyms are fallbacks, never a single long OR-style query.
+  if (/\b(?:earbuds?|earphones?|airpods?)\b/i.test(cleaned)) {
+    queries.push("wireless earbuds", "earbuds", "wireless earphones");
+  } else if (/\b(?:headphones?|headsets?)\b/i.test(cleaned)) {
+    queries.push("wireless headphones", "headphones", "bluetooth headset");
+  } else if (/\b(?:wristwatch|smartwatch|watches?)\b/i.test(cleaned)) {
+    queries.push("watches", "wristwatch", "smartwatch");
+  } else if (/\b(?:flowers?|bouquets?|roses?)\b/i.test(cleaned)) {
+    queries.push("flowers", "flower bouquet", "roses");
+  } else if (/\b(?:perfume|fragrance|cologne)\b/i.test(cleaned)) {
+    queries.push("perfume", "fragrance");
+  }
+
+  return [...new Set(queries.map((query) => query.trim()).filter((query) => query.length >= 3))].slice(
+    0,
+    3
+  );
+}
+
+function categoryForSearchQuery(query: string) {
+  if (/\bflowers?\b/i.test(query) && !/\bcakes?\b/i.test(query)) {
+    return /\bbirthday\b/i.test(query) ? "Birthday Flowers" : "flowers";
+  }
+
+  if (/\bcakes?\b/i.test(query) && !/\bflowers?\b/i.test(query)) {
+    return "cakes";
+  }
+
+  return null;
 }
 
 async function searchKaprukaProductsDirect(
   message: string,
-  memory: AgentMemory
+  memory: AgentMemory,
+  history: ChatHistoryMessage[] = []
 ) {
   const headers = await startDirectMcpSession();
   const budget = extractBudget(message, memory);
-  const result = await callDirectMcpTool(headers, 2, "kapruka_search_products", {
-    q: buildSearchQuery(message, memory),
-    category: null,
-    limit: SEARCH_RESULT_LIMIT,
-    cursor: null,
-    currency: "LKR",
-    min_price: null,
-    max_price: budget ?? null,
-    in_stock_only: false,
-    sort: "relevance",
-    include_stubs: false,
-    response_format: "json",
-  });
-  const parsed = parseMcpToolJson(result);
+  const queries = buildSearchQueries(message, memory, history);
+  const diversifyGiftSearch =
+    queries.some((query) => /\bgifts?\b/i.test(query)) &&
+    queries.some((query) => /\bflowers?\b/i.test(query)) &&
+    queries.some((query) => /\bhamper\b/i.test(query));
+  const attempts: Array<{ q: string; category: string | null }> = [];
+  const products: ProductLike[] = [];
 
-  if (!parsed) return [];
+  for (const [index, query] of queries.entries()) {
+    const preferredCategory = categoryForSearchQuery(query);
+    const categories = preferredCategory ? [preferredCategory, null] : [null];
 
-  return collectProductObjects(parsed)
-    .map((productObject, index) => productFromObject(productObject, index))
-    .filter((product): product is ProductLike => Boolean(product));
+    for (const category of categories) {
+      attempts.push({ q: query, category });
+      const result = await callDirectMcpTool(
+        headers,
+        index + attempts.length + 1,
+        "kapruka_search_products",
+        {
+          q: query,
+          category,
+          limit: diversifyGiftSearch ? 3 : SEARCH_RESULT_LIMIT,
+          cursor: null,
+          currency: "LKR",
+          min_price: null,
+          max_price: budget ?? null,
+          in_stock_only: false,
+          sort: "relevance",
+          include_stubs: false,
+          response_format: "json",
+        }
+      );
+      const parsed = parseMcpToolJson(result);
+      const attemptProducts = parsed
+        ? collectProductObjects(parsed)
+            .map((productObject, productIndex) =>
+              productFromObject(productObject, products.length + productIndex)
+            )
+            .filter((product): product is ProductLike => Boolean(product))
+            .filter((product) => productMatchesStrictRequest(product, query))
+        : [];
+
+      products.push(...attemptProducts);
+
+      if (attemptProducts.length > 0) break;
+    }
+
+    if (!diversifyGiftSearch && products.length >= PRODUCT_CARD_LIMIT) break;
+  }
+
+  return { products: mergeProducts(products, []), attempts };
 }
 
 function getSriLankaDate(offsetDays = 0) {
@@ -1317,10 +1443,20 @@ function parseProductJsonLd(html: string) {
 }
 
 function metadataFromProductJsonLd(product: AnyRecord): ProductPageMetadata {
-  const offersValue = Array.isArray(product.offers)
-    ? product.offers[0]
-    : product.offers;
-  const offers = isRecord(offersValue) ? offersValue : null;
+  const offerCandidates = (Array.isArray(product.offers)
+    ? product.offers
+    : [product.offers]
+  ).filter(isRecord);
+  const offers =
+    offerCandidates
+      .map((offer) => ({ offer, price: pickNumber(offer, ["price"]) }))
+      .filter(
+        (candidate): candidate is { offer: AnyRecord; price: number } =>
+          typeof candidate.price === "number" && candidate.price > 0
+      )
+      .sort((first, second) => first.price - second.price)[0]?.offer ||
+    offerCandidates[0] ||
+    null;
   const aggregateRating = isRecord(product.aggregateRating)
     ? product.aggregateRating
     : null;
@@ -1345,6 +1481,7 @@ function metadataFromProductJsonLd(product: AnyRecord): ProductPageMetadata {
     imageUrl:
       typeof rawImage === "string" ? normalizeUrl(rawImage) : null,
     price: offers ? pickNumber(offers, ["price"]) : null,
+    compareAtPrice: null,
     inStock: availability
       ? availability.includes("instock")
       : null,
@@ -1363,6 +1500,19 @@ function metadataFromProductJsonLd(product: AnyRecord): ProductPageMetadata {
       ? pickString(offers, ["priceValidUntil"])
       : null,
   };
+}
+
+function extractDisplayedPrice(html: string, elementId: string) {
+  const escapedId = elementId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = html.match(
+    new RegExp(
+      `<[^>]+id=["']${escapedId}["'][^>]*>([\\s\\S]*?)<\\/[^>]+>`,
+      "i"
+    )
+  );
+  const text = match?.[1]?.replace(/<[^>]+>/g, " ") || "";
+
+  return pickNumber({ value: text }, ["value"]);
 }
 
 async function getMetadataFromProductPage(productUrl: string) {
@@ -1385,6 +1535,11 @@ async function getMetadataFromProductPage(productUrl: string) {
 
     const html = await response.text();
     const jsonLdProduct = parseProductJsonLd(html);
+    const displayedSalePrice = extractDisplayedPrice(
+      html,
+      "priceAfterDiscountlbl"
+    );
+    const displayedOriginalPrice = extractDisplayedPrice(html, "pricelbl");
 
     const imageMatch =
       html.match(
@@ -1406,6 +1561,7 @@ async function getMetadataFromProductPage(productUrl: string) {
       : {
           imageUrl,
           price: null,
+          compareAtPrice: null,
           inStock: null,
           description: null,
           rating: null,
@@ -1417,6 +1573,16 @@ async function getMetadataFromProductPage(productUrl: string) {
         };
 
     metadata.imageUrl ||= imageUrl;
+    if (displayedSalePrice !== null && displayedSalePrice > 0) {
+      metadata.price = displayedSalePrice;
+      metadata.compareAtPrice =
+        displayedOriginalPrice !== null &&
+        displayedOriginalPrice > displayedSalePrice
+          ? displayedOriginalPrice
+          : null;
+    } else if (displayedOriginalPrice !== null && displayedOriginalPrice > 0) {
+      metadata.price = displayedOriginalPrice;
+    }
     productMetadataCache.set(productUrl, metadata);
 
     return metadata;
@@ -1438,14 +1604,48 @@ async function enrichProductsWithMetadata(products: ProductLike[]) {
 
       if (!metadata) return product;
 
+      const hasVerifiedMetadataRating =
+        typeof metadata.rating === "number" &&
+        metadata.rating > 0 &&
+        metadata.rating <= 5 &&
+        typeof metadata.reviewCount === "number" &&
+        metadata.reviewCount > 0;
+      const livePrice =
+        typeof metadata.price === "number" && metadata.price > 0
+          ? metadata.price
+          : null;
+      const catalogPrice =
+        typeof product.price === "number" && product.price > 0
+          ? product.price
+          : null;
+      const currentPrice = livePrice ?? catalogPrice;
+      const compareAtCandidates = [
+        metadata.compareAtPrice,
+        product.compareAtPrice,
+        catalogPrice,
+      ]
+        .filter(
+          (price): price is number =>
+            typeof price === "number" &&
+            price > 0 &&
+            currentPrice !== null &&
+            price > currentPrice
+        )
+        .sort((first, second) => second - first);
+
       return {
         ...product,
         imageUrl: product.imageUrl || metadata.imageUrl,
-        price: product.price ?? metadata.price,
+        price: currentPrice,
+        compareAtPrice: compareAtCandidates[0] ?? null,
         inStock: product.inStock ?? metadata.inStock,
         description: product.description || metadata.description,
-        rating: product.rating ?? metadata.rating,
-        reviewCount: product.reviewCount ?? metadata.reviewCount,
+        rating:
+          product.rating ??
+          (hasVerifiedMetadataRating ? metadata.rating : null),
+        reviewCount:
+          product.reviewCount ??
+          (hasVerifiedMetadataRating ? metadata.reviewCount : null),
         brand: product.brand || metadata.brand,
         category: product.category || metadata.category,
         freeShipping: product.freeShipping ?? metadata.freeShipping,
@@ -1457,6 +1657,10 @@ async function enrichProductsWithMetadata(products: ProductLike[]) {
 }
 
 function cleanReplyForUi(reply: string, productCount: number) {
+  if (productCount > 0) {
+    return "";
+  }
+
   const lines = reply.split("\n");
 
   const cleanedLines = lines.filter((line) => {
@@ -1473,10 +1677,6 @@ function cleanReplyForUi(reply: string, productCount: number) {
   });
 
   const cleaned = cleanedLines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-
-  if (productCount > 0) {
-    return cleaned || `I found ${productCount} good options for you.`;
-  }
 
   return cleaned || reply;
 }
@@ -1549,13 +1749,25 @@ function parseAgentMemory(value: unknown): AgentMemory {
 function extractBudget(message: string, memory: AgentMemory) {
   const normalized = message.toLowerCase().replace(/,/g, "");
   const budgetMatch = normalized.match(
-    /\b(?:under|below|less than|max|maximum|budget|rs\.?|lkr)\s*(\d{3,7})\b|\b(\d{3,7})\s*(?:rs|lkr)\b/i
+    /\b(?:under|below|less than|up to|max|maximum|budget(?: of)?)\s*(?:rs\.?|lkr)?\s*(\d{3,7})\b|\b(?:rs\.?|lkr)\s*(\d{3,7})\b|\b(\d{3,7})\s*(?:rs|lkr)\b/i
   );
-  const value = Number(budgetMatch?.[1] || budgetMatch?.[2]);
+  const value = Number(
+    budgetMatch?.[1] || budgetMatch?.[2] || budgetMatch?.[3]
+  );
+  const compactBudgetMatch = normalized.match(
+    /\b(?:under|below|less than|up to|max|maximum|budget(?: of)?)?\s*(?:rs\.?|lkr)?\s*(\d{1,3}(?:\.\d+)?)\s*k\b/i
+  );
+  const compactValue = Number(compactBudgetMatch?.[1]) * 1000;
 
   if (Number.isFinite(value) && value > 0) return value;
+  if (Number.isFinite(compactValue) && compactValue > 0) return compactValue;
 
-  return typeof memory.preferredBudget === "number"
+  const explicitlyReusesBudget =
+    /\b(?:same|again|previous|last|keep|use)\b[\s\S]{0,30}\b(?:budget|price|limit|cap)\b|\b(?:same|that)\s+(?:budget|price|limit|cap)\b/i.test(
+      normalized
+    );
+
+  return explicitlyReusesBudget && typeof memory.preferredBudget === "number"
     ? memory.preferredBudget
     : null;
 }
@@ -1710,8 +1922,17 @@ function clearlyAsksForProductSearch(
 
   if (isVagueGiftIdeaRequest(normalized)) return false;
 
-  const explicitBrowseVerb =
-    /\b(?:find|show|recommend|suggest|search|browse|shop|buy|purchase|look for|looking for|options?|choices?|shortlist|best|top)\b/i.test(
+  const explicitCommerceRequest =
+    /\b(?:find|show|search|browse|shop|buy|purchase|look for|looking for|get me|give me|options? for|choices? for|shortlist)\b/i.test(
+      normalized
+    );
+  const recommendationRequest =
+    /\b(?:recommend|suggest|best|top|options?|choices?)\b/i.test(normalized);
+  const productAvailabilityQuestion =
+    /\b(?:do you have|have you got|have any|are there any|is there any|is there|do you sell|can i get|can i buy)\b/i.test(
+      normalized
+    ) &&
+    !/\b(?:any idea|time|a minute|a moment|feelings?|thoughts?|questions?|anything to say)\b/i.test(
       normalized
     );
   const concreteNeed =
@@ -1719,7 +1940,9 @@ function clearlyAsksForProductSearch(
     hasConcreteShoppingSubject(normalized);
 
   return (
-    (explicitBrowseVerb && hasConcreteShoppingSubject(normalized)) ||
+    explicitCommerceRequest ||
+    recommendationRequest ||
+    productAvailabilityQuestion ||
     concreteNeed ||
     hasShoppingFollowUpContext(normalized, history)
   );
@@ -2058,6 +2281,7 @@ function productMatchesStrictRequest(product: ProductLike, message: string) {
   if (aliases.length === 0) return true;
 
   const productText = productTextForRanking(product).toLowerCase();
+  const productName = product.name.toLowerCase();
   const asksForWatch = /\b(?:watch|watches|wristwatch|smartwatch)\b/i.test(
     message
   );
@@ -2065,6 +2289,53 @@ function productMatchesStrictRequest(product: ProductLike, message: string) {
     /\b(?:box|case|strap|band|charger|protector|stand|holder|storage|display)\b/i.test(
       message
     );
+  const asksForEarbuds = /\b(?:earbuds?|earphones?|airpods?)\b/i.test(message);
+  const asksForHeadphones = /\b(?:headphones?|headsets?)\b/i.test(message);
+  const asksForFlowers = /\b(?:flowers?|bouquets?|roses?)\b/i.test(message);
+  const asksForCake = /\b(?:cakes?|cupcakes?)\b/i.test(message);
+  const asksForAudioAccessory =
+    /\b(?:holder|stand|case|cover|bag|cable|adapter|earpads?|cushions?|replacement|parts?)\b/i.test(
+      message
+    );
+
+  if (
+    asksForEarbuds &&
+    !/\b(?:ear\s*buds?|earphones?|airpods?)\b/i.test(productText)
+  ) {
+    return false;
+  }
+
+  if (
+    asksForHeadphones &&
+    !asksForAudioAccessory &&
+    (!/\b(?:headphones?|headsets?)\b/i.test(productText) ||
+      /\b(?:holder|stand|case|cover|bag|cable|adapter|earpads?|cushions?|replacement|parts?)\b/i.test(
+        productText
+      ))
+  ) {
+    return false;
+  }
+
+  if (
+    asksForFlowers &&
+    !asksForCake &&
+    /\b(?:cakes?|cupcakes?|icing|frosting)\b/i.test(productText)
+  ) {
+    return false;
+  }
+
+  if (
+    asksForFlowers &&
+    !asksForCake &&
+    (!/\b(?:bouquets?|boquets?|roses?|blooms?|flower\s+(?:arrangements?|bunch(?:es)?|baskets?|bouquets?)|floral\s+arrangements?)\b/i.test(
+      productName
+    ) ||
+      /\b(?:clips?|jewellery|jewelry|earrings?|necklace|dress|shirt|print|decor|decoration|artificial)\b/i.test(
+        productName
+      ))
+  ) {
+    return false;
+  }
 
   if (
     asksForWatch &&
@@ -2210,8 +2481,22 @@ function rankProductsForAgent(
   const relevantProducts = uniqueProducts.filter((product) =>
     productMatchesStrictRequest(product, message)
   );
-  const sourceProducts =
-    relevantProducts.length > 0 ? relevantProducts : uniqueProducts;
+  const pricedProducts = relevantProducts
+    .filter(
+      (product): product is ProductLike & { price: number } =>
+        typeof product.price === "number" && product.price > 0
+    )
+    .sort((first, second) => first.price - second.price);
+  const medianPrice =
+    pricedProducts.length >= 5
+      ? pricedProducts[Math.floor(pricedProducts.length / 2)].price
+      : null;
+  const sourceProducts = relevantProducts.filter(
+    (product) =>
+      medianPrice === null ||
+      product.price === null ||
+      product.price <= medianPrice * 8
+  );
   const ranked = sourceProducts.map((product) => ({
     product,
     ranking: scoreProductForAgent(product, message, memory),
@@ -3037,12 +3322,22 @@ export async function POST(req: Request) {
 
     if (process.env.LLM_PROVIDER === "gemini" && planNeedsProductSearch(plan)) {
       const searchStartedAt = Date.now();
-      const searchQuery = buildSearchQuery(message, memory);
       let searchStatus: AgentToolCall["status"] = "called";
       let productsFromMcp: ProductLike[] = [];
+      let searchAttempts: Array<{ q: string; category: string | null }> =
+        buildSearchQueries(message, memory, history).map((query) => ({
+          q: query,
+          category: categoryForSearchQuery(query),
+        }));
 
       try {
-        productsFromMcp = await searchKaprukaProductsDirect(message, memory);
+        const searchResult = await searchKaprukaProductsDirect(
+          message,
+          memory,
+          history
+        );
+        productsFromMcp = searchResult.products;
+        searchAttempts = searchResult.attempts;
       } catch (error) {
         searchStatus = "failed";
         console.warn("Kapruka direct product search failed:", error);
@@ -3058,7 +3353,7 @@ export async function POST(req: Request) {
           status: searchStatus,
           latencyMs: Date.now() - searchStartedAt,
           arguments: {
-            q: searchQuery,
+            queries: searchAttempts,
             limit: SEARCH_RESULT_LIMIT,
             max_price: extractBudget(message, memory) ?? null,
             response_format: "json",
@@ -3067,18 +3362,34 @@ export async function POST(req: Request) {
       ];
       let reply: string;
 
-      try {
-        reply = removeRoboticLines(await callGeminiWithProducts(
-          message,
-          location,
-          history,
-          memory,
-          plan,
-          products
-        ));
-      } catch (error) {
-        console.warn("Gemini product reply failed, using fallback:", error);
-        reply = fallbackProductReply(products.length);
+      if (searchStatus === "failed") {
+        reply =
+          "Kapruka's live product search is temporarily unavailable. I haven't treated that as an empty catalogue - try the search again in a moment.";
+      } else if (products.length === 0) {
+        const budget = extractBudget(message, memory);
+        const budgetText = budget ? ` within Rs. ${budget.toLocaleString()}` : "";
+        reply = `I searched Kapruka using ${searchAttempts
+          .map(
+            (attempt) =>
+              `“${attempt.q}”${attempt.category ? ` in ${attempt.category}` : ""}`
+          )
+          .join(" and ")}, but the live search returned no matching products${budgetText}.`;
+      } else {
+        try {
+          reply = removeRoboticLines(
+            await callGeminiWithProducts(
+              message,
+              location,
+              history,
+              memory,
+              plan,
+              products
+            )
+          );
+        } catch (error) {
+          console.warn("Gemini product reply failed, using fallback:", error);
+          reply = fallbackProductReply(products.length);
+        }
       }
 
       const agentState = buildAgentState({

@@ -67,6 +67,7 @@ function ProductDetailContent({
 }: DetailProps) {
   const [details, setDetails] = useState<ProductDetails | null>(null);
   const [selectedImage, setSelectedImage] = useState(0);
+  const [failedImages, setFailedImages] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(Boolean(product.productUrl));
   const [error, setError] = useState(
     product.productUrl
@@ -137,14 +138,28 @@ function ProductDetailContent({
     return [
       ...(details?.images || []),
       ...(product.imageUrl ? [product.imageUrl] : []),
-    ].filter((image, index, all) => all.indexOf(image) === index);
-  }, [details?.images, product]);
+    ].filter(
+      (image, index, all) =>
+        all.indexOf(image) === index && !failedImages.has(image)
+    );
+  }, [details?.images, failedImages, product]);
 
-  const currentImage = images[selectedImage] || null;
+  const currentImageIndex = Math.min(
+    selectedImage,
+    Math.max(0, images.length - 1)
+  );
+  const currentImage = images[currentImageIndex] || null;
   const hasDiscount =
     product.price !== null &&
     typeof product.compareAtPrice === "number" &&
     product.compareAtPrice > product.price;
+  const discountPercentage = hasDiscount
+    ? Math.round(
+        ((product.compareAtPrice! - product.price!) /
+          product.compareAtPrice!) *
+          100
+      )
+    : null;
   const isOutOfStock = product.inStock === false;
   const title = details?.name || product.name;
 
@@ -170,11 +185,11 @@ function ProductDetailContent({
       >
         <header className="product-detail-header flex items-center justify-between border-b border-white/10 bg-slate-950/90 px-4 py-3 backdrop-blur-xl sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-300">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300">
               <Sparkles size={19} />
             </span>
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-300">
                 Product details
               </p>
               <p className="truncate text-sm text-slate-400">
@@ -195,15 +210,20 @@ function ProductDetailContent({
 
         <div className="product-detail-scroll flex-1 overflow-y-auto">
           <div className="grid min-h-full lg:grid-cols-[minmax(0,1.05fr)_minmax(380px,0.95fr)]">
-            <div className="product-detail-gallery border-b border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-emerald-950/30 p-4 sm:p-7 lg:sticky lg:top-0 lg:h-[calc(100vh-7rem)] lg:max-h-[820px] lg:border-b-0 lg:border-r">
+            <div className="product-detail-gallery border-b border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-purple-950/30 p-4 sm:p-7 lg:sticky lg:top-0 lg:h-[calc(100vh-7rem)] lg:max-h-[820px] lg:border-b-0 lg:border-r">
               <div className="mx-auto flex h-full max-w-2xl flex-col">
-                <div className="product-detail-image-stage relative flex min-h-[320px] flex-1 items-center justify-center overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.025] p-4 shadow-[0_30px_90px_-45px_rgba(16,185,129,0.4)] sm:min-h-[460px]">
+                <div className="product-detail-image-stage relative flex min-h-[320px] flex-1 items-center justify-center overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.025] p-4 shadow-[0_30px_90px_-45px_rgba(64,41,112,0.35)] sm:min-h-[460px]">
                   {currentImage ? (
                     // Kapruka images are served through the local allow-listed proxy.
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={proxiedImage(currentImage, product.productUrl)}
                       alt={title}
+                      onError={() =>
+                        setFailedImages((current) =>
+                          new Set(current).add(currentImage)
+                        )
+                      }
                       className="h-full max-h-[620px] w-full object-contain"
                     />
                   ) : (
@@ -236,7 +256,7 @@ function ProductDetailContent({
 
                   {images.length > 1 && (
                     <span className="absolute bottom-3 right-3 rounded-full bg-slate-950/75 px-3 py-1.5 text-xs font-semibold text-white backdrop-blur">
-                      {selectedImage + 1} / {images.length}
+                      {currentImageIndex + 1} / {images.length}
                     </span>
                   )}
                 </div>
@@ -249,10 +269,10 @@ function ProductDetailContent({
                         type="button"
                         onClick={() => setSelectedImage(index)}
                         aria-label={`Show product image ${index + 1}`}
-                        aria-pressed={selectedImage === index}
+                        aria-pressed={currentImageIndex === index}
                         className={`product-detail-thumbnail h-20 w-20 shrink-0 overflow-hidden rounded-2xl border-2 bg-white/[0.035] p-1 transition ${
-                          selectedImage === index
-                            ? "border-emerald-400 shadow-lg shadow-emerald-500/20"
+                          currentImageIndex === index
+                            ? "border-purple-400 shadow-lg shadow-purple-500/20"
                             : "border-transparent opacity-65 hover:opacity-100"
                         }`}
                       >
@@ -260,6 +280,11 @@ function ProductDetailContent({
                         <img
                           src={proxiedImage(image, product.productUrl)}
                           alt=""
+                          onError={() =>
+                            setFailedImages((current) =>
+                              new Set(current).add(image)
+                            )
+                          }
                           className="h-full w-full rounded-xl object-contain"
                         />
                       </button>
@@ -286,7 +311,7 @@ function ProductDetailContent({
                     className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                       isOutOfStock
                         ? "bg-rose-500/15 text-rose-300"
-                        : "bg-emerald-500/15 text-emerald-300"
+                        : "bg-purple-500/15 text-purple-300"
                     }`}
                   >
                     {isOutOfStock ? "Currently unavailable" : "Available to order"}
@@ -300,7 +325,11 @@ function ProductDetailContent({
                   {title}
                 </h2>
 
-                {typeof product.rating === "number" && product.rating > 0 && (
+                {typeof product.rating === "number" &&
+                  product.rating > 0 &&
+                  product.rating <= 5 &&
+                  typeof product.reviewCount === "number" &&
+                  product.reviewCount > 0 && (
                   <div className="mt-4 flex items-center gap-2 text-sm">
                     <span className="flex items-center gap-1 text-amber-400">
                       <Star size={18} fill="currentColor" />
@@ -318,21 +347,40 @@ function ProductDetailContent({
                 )}
 
                 <div className="mt-6 flex flex-wrap items-end gap-3">
-                  <p className="text-3xl font-black text-emerald-300">
+                  <p
+                    className={`text-3xl font-black ${
+                      hasDiscount ? "text-emerald-300" : "text-purple-300"
+                    }`}
+                  >
+                    {hasDiscount && (
+                      <span className="mr-2 align-middle text-xs font-black uppercase tracking-[0.16em] text-emerald-400">
+                        Now
+                      </span>
+                    )}
                     {product.price === null
                       ? "Price unavailable"
                       : `Rs. ${formatPrice(product.price)}`}
                   </p>
                   {hasDiscount && (
-                    <p className="pb-1 text-base text-slate-500 line-through">
-                      Rs. {formatPrice(product.compareAtPrice!)}
+                    <p className="pb-1 text-base font-medium text-slate-500">
+                      <span className="mr-1.5 text-xs uppercase tracking-wide">
+                        Was
+                      </span>
+                      <span className="line-through decoration-rose-400 decoration-2">
+                        Rs. {formatPrice(product.compareAtPrice!)}
+                      </span>
                     </p>
+                  )}
+                  {discountPercentage && (
+                    <span className="mb-0.5 rounded-full bg-rose-500 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-white shadow-sm">
+                      Save {discountPercentage}%
+                    </span>
                   )}
                 </div>
 
                 <div className="mt-6 grid gap-3 sm:grid-cols-2">
                   <div className="flex gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                    <PackageCheck className="shrink-0 text-emerald-300" size={21} />
+                    <PackageCheck className="shrink-0 text-purple-300" size={21} />
                     <div>
                       <p className="text-sm font-semibold text-white">
                         Kapruka marketplace
@@ -343,7 +391,7 @@ function ProductDetailContent({
                     </div>
                   </div>
                   <div className="flex gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                    <ShieldCheck className="shrink-0 text-emerald-300" size={21} />
+                    <ShieldCheck className="shrink-0 text-purple-300" size={21} />
                     <div>
                       <p className="text-sm font-semibold text-white">
                         Real product page
@@ -360,7 +408,7 @@ function ProductDetailContent({
                     type="button"
                     onClick={() => onAddToCart(product)}
                     disabled={isInCart || isOutOfStock}
-                    className="flex min-h-13 flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:bg-white/[0.08] disabled:text-slate-500"
+                    className="flex min-h-13 flex-1 items-center justify-center gap-2 rounded-2xl bg-purple-500 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-purple-400 disabled:bg-white/[0.08] disabled:text-slate-500"
                   >
                     {isInCart ? <Check size={19} /> : <ShoppingCart size={19} />}
                     {isInCart
@@ -374,7 +422,7 @@ function ProductDetailContent({
                       href={product.productUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex min-h-13 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-3.5 text-sm font-semibold text-white transition hover:border-emerald-400/40 hover:bg-white/10"
+                      className="flex min-h-13 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-3.5 text-sm font-semibold text-white transition hover:border-purple-400/40 hover:bg-white/10"
                     >
                       <ExternalLink size={18} />
                       Open on Kapruka
@@ -408,7 +456,7 @@ function ProductDetailContent({
                           key={highlight}
                           className="flex gap-3 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-transparent p-4"
                         >
-                          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300">
+                          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-500/15 text-purple-300">
                             <Check size={14} />
                           </span>
                           <p className="text-sm leading-6 text-slate-300">
@@ -463,13 +511,13 @@ function ProductDetailContent({
                       {details.questions.map(({ question, answer }, index) => (
                         <details
                           key={`${question}-${index}`}
-                          className="group rounded-2xl border border-white/10 bg-white/[0.035] open:border-emerald-400/30 open:bg-emerald-500/[0.06]"
+                          className="group rounded-2xl border border-white/10 bg-white/[0.035] open:border-purple-400/30 open:bg-purple-500/[0.06]"
                         >
                           <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-sm font-semibold leading-6 text-white">
                             {question}
                             <ChevronRight
                               size={18}
-                              className="shrink-0 text-slate-500 transition group-open:rotate-90 group-open:text-emerald-300"
+                              className="shrink-0 text-slate-500 transition group-open:rotate-90 group-open:text-purple-300"
                             />
                           </summary>
                           <p className="border-t border-white/10 px-5 py-4 text-sm leading-7 text-slate-300">

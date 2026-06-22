@@ -9,6 +9,11 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-purple-200: #c9c0dc;
+  --color-purple-300: #a093bd;
+  --color-purple-400: #68528f;
+  --color-purple-500: #402970;
+  --color-purple-950: #1c1232;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -120,8 +125,8 @@ button:disabled,
   color: #94a3b8;
 }
 
-.app-theme[data-theme="light"] .text-emerald-300 {
-  color: #047857;
+.app-theme[data-theme="light"] .text-purple-300 {
+  color: #402970;
 }
 
 .app-theme[data-theme="light"] .text-amber-100,
@@ -133,10 +138,10 @@ button:disabled,
   color: #be123c;
 }
 
-.app-theme[data-theme="light"] [class~="bg-emerald-500"].text-white,
-.app-theme[data-theme="light"] [class~="bg-emerald-400"].text-white,
-.app-theme[data-theme="light"] [class~="bg-emerald-500"] .text-white,
-.app-theme[data-theme="light"] [class~="bg-emerald-400"] .text-white {
+.app-theme[data-theme="light"] [class~="bg-purple-500"].text-white,
+.app-theme[data-theme="light"] [class~="bg-purple-400"].text-white,
+.app-theme[data-theme="light"] [class~="bg-purple-500"] .text-white,
+.app-theme[data-theme="light"] [class~="bg-purple-400"] .text-white {
   color: #ffffff;
 }
 
@@ -236,7 +241,7 @@ button:disabled,
 }
 
 .app-theme[data-theme="light"] .product-detail-gallery {
-  background: linear-gradient(145deg, #f8fafc 0%, #eef2f7 62%, #ecfdf5 100%);
+  background: linear-gradient(145deg, #f8fafc 0%, #eef2f7 62%, #faf5ff 100%);
 }
 
 .app-theme[data-theme="light"] .product-detail-image-stage {
@@ -281,15 +286,15 @@ button:disabled,
 .search-wave-dots {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
+  gap: 4px;
+  height: 20px;
 }
 
 .search-wave-dots span {
-  width: 7px;
-  height: 7px;
+  width: 5px;
+  height: 5px;
   border-radius: 9999px;
-  background: #10b981;
+  background: #402970;
   animation: search-wave 900ms ease-in-out infinite;
 }
 
@@ -330,7 +335,7 @@ button:disabled,
 
   50% {
     opacity: 1;
-    transform: translateY(-7px) scale(1.08);
+    transform: translateY(-4px) scale(1.08);
   }
 }
 

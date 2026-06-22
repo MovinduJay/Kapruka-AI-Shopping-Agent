@@ -477,16 +477,6 @@ export default function Home() {
     [...messages].reverse().find((message) => message.role === "user")
       ?.content || "";
 
-  function userMessageBefore(messageIndex: number) {
-    for (let index = messageIndex - 1; index >= 0; index -= 1) {
-      const message = messages[index];
-
-      if (message.role === "user") return message.content;
-    }
-
-    return latestUserMessage;
-  }
-
   function assistantGroupContent(messageIndex: number) {
     let startIndex = messageIndex;
 
@@ -550,8 +540,8 @@ export default function Home() {
         <header className="border-b border-white/10 px-4 py-4 sm:px-6">
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3">
-              <div className="shrink-0 rounded-2xl bg-emerald-500/20 p-3">
-                <Sparkles className="text-emerald-300" size={24} />
+              <div className="shrink-0 rounded-2xl bg-purple-500/20 p-3">
+                <Sparkles className="text-purple-300" size={24} />
               </div>
 
               <div className="min-w-0">
@@ -571,7 +561,7 @@ export default function Home() {
                 aria-label={`Switch to ${
                   theme === "light" ? "dark" : "light"
                 } mode`}
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-slate-300 transition hover:border-emerald-400/60 hover:bg-emerald-500/15 hover:text-emerald-300"
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-slate-300 transition hover:border-purple-400/60 hover:bg-purple-500/15 hover:text-purple-300"
               >
                 {theme === "light" ? <Moon size={20} /> : <Sun size={20} />}
               </button>
@@ -580,7 +570,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setCartOpen(true)}
                 aria-label={`Open cart with ${cart.length} items`}
-                className="group relative flex shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3.5 py-3 text-sm font-semibold text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-emerald-400/60 hover:bg-emerald-500/15 hover:shadow-[0_12px_30px_-14px_rgba(16,185,129,0.8)] active:translate-y-0 active:scale-95"
+                className="group relative flex shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3.5 py-3 text-sm font-semibold text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-purple-400/60 hover:bg-purple-500/15 hover:shadow-[0_12px_30px_-14px_rgba(64,41,112,0.55)] active:translate-y-0 active:scale-95"
               >
                 <ShoppingCart
                   size={21}
@@ -588,7 +578,7 @@ export default function Home() {
                 />
                 <span className="hidden sm:inline">Cart</span>
                 {cart.length > 0 && (
-                  <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-xs font-bold text-white">
+                  <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-purple-500 px-1.5 text-xs font-bold text-white">
                     {cart.length}
                   </span>
                 )}
@@ -626,7 +616,8 @@ export default function Home() {
                   ? assistantGroupProducts(index)
                   : [];
               const shouldShowMessageActions =
-                message.role === "user" || isLastAssistantInGroup;
+                (message.role === "user" || isLastAssistantInGroup) &&
+                message.content.trim().length > 0;
               const hasVisibleProducts =
                 message.products?.length || groupProducts.length;
 
@@ -658,7 +649,7 @@ export default function Home() {
                       )}
                     </div>
                   ) : (
-                    <div className="ml-auto w-fit max-w-2xl whitespace-pre-wrap rounded-[28px] rounded-br-md bg-emerald-500 px-5 py-2.5 text-lg leading-7 text-white shadow-sm">
+                    <div className="ml-auto w-fit max-w-2xl whitespace-pre-wrap rounded-[28px] rounded-br-md bg-purple-500 px-5 py-2.5 text-lg leading-7 text-white shadow-sm">
                       {message.content}
                     </div>
                   )}
@@ -707,9 +698,6 @@ export default function Home() {
                         cartProductIds={cart.map((item) => item.id)}
                         onAddToCart={addToCart}
                         onViewDetails={viewProductDetails}
-                        onSearchRevision={sendMessage}
-                        searchQuery={userMessageBefore(index)}
-                        disabled={loading}
                       />
                     )}
                 </div>
@@ -751,7 +739,7 @@ export default function Home() {
                   : "bg-slate-900"
               }`}
             >
-              <div className="flex items-center pl-2 text-emerald-300">
+              <div className="flex items-center pl-2 text-purple-300">
                 <Sparkles size={19} />
               </div>
 
@@ -773,7 +761,7 @@ export default function Home() {
                 onClick={() => sendMessage()}
                 disabled={loading}
                 aria-label="Send message"
-                className="rounded-xl bg-emerald-500 px-3.5 py-2.5 text-sm font-semibold hover:bg-emerald-400 disabled:opacity-50"
+                className="rounded-xl bg-purple-500 px-3.5 py-2.5 text-sm font-semibold hover:bg-purple-400 disabled:opacity-50"
               >
                 <Send size={18} />
               </button>
@@ -833,7 +821,7 @@ export default function Home() {
                         <h3 className="text-sm font-semibold text-white">
                           {item.name}
                         </h3>
-                        <p className="mt-1 text-sm font-bold text-emerald-300">
+                        <p className="mt-1 text-sm font-bold text-purple-300">
                           Rs. {item.price?.toLocaleString() ?? "N/A"}
                         </p>
                       </div>
@@ -854,9 +842,9 @@ export default function Home() {
 
             {cart.length > 0 && (
               <div className="border-t border-white/10 p-6">
-                <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+                <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-4">
                   <p className="text-sm text-slate-300">Cart total</p>
-                  <p className="mt-1 text-2xl font-bold text-emerald-300">
+                  <p className="mt-1 text-2xl font-bold text-purple-300">
                     Rs. {cartTotal.toLocaleString()}
                   </p>
 
@@ -866,7 +854,7 @@ export default function Home() {
                       setCartOpen(false);
                       setDeliveryPanelOpen(true);
                     }}
-                    className="mt-4 w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-400"
+                    className="mt-4 w-full rounded-xl bg-purple-500 px-4 py-3 text-sm font-semibold text-white hover:bg-purple-400"
                   >
                     Continue to delivery
                   </button>

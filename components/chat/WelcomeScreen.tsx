@@ -137,8 +137,8 @@ export function WelcomeScreen({
   return (
     <div className="flex flex-1 items-center overflow-hidden px-4 py-10 font-sans sm:px-6">
       <div className="mx-auto w-full max-w-6xl text-center">
-        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[28px] bg-emerald-500/20">
-          <Sparkles className="text-emerald-300" size={40} />
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[28px] bg-purple-500/20">
+          <Sparkles className="text-purple-300" size={40} />
         </div>
 
         <h2 className="mt-8 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
@@ -148,8 +148,8 @@ export function WelcomeScreen({
           What do you need today?
         </p>
 
-        <div className="mx-auto mt-8 flex w-full max-w-3xl gap-2 rounded-full border border-emerald-400/60 bg-white/[0.07] p-2 shadow-[0_20px_60px_-30px_rgba(16,185,129,0.6)]">
-          <div className="flex items-center pl-3 text-emerald-300">
+        <div className="mx-auto mt-8 flex w-full max-w-3xl gap-2 rounded-full border border-purple-400/60 bg-white/[0.07] p-2 shadow-[0_20px_60px_-30px_rgba(64,41,112,0.45)]">
+          <div className="flex items-center pl-3 text-purple-300">
             <Sparkles size={20} />
           </div>
           <input
@@ -165,7 +165,7 @@ export function WelcomeScreen({
             onClick={() => onSubmit()}
             disabled={!input.trim()}
             aria-label="Start shopping"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white transition hover:bg-emerald-400 disabled:opacity-40"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-purple-500 text-white transition hover:bg-purple-400 disabled:opacity-40"
           >
             <Send size={18} />
           </button>
@@ -208,9 +208,9 @@ export function WelcomeScreen({
                   key={suggestion.label}
                   type="button"
                   onClick={() => onSubmit(suggestion.prompt)}
-                  className="aspect-square w-[82%] shrink-0 snap-start cursor-pointer rounded-[30px] border border-white/10 bg-white/[0.06] p-5 text-left shadow-lg transition duration-200 hover:border-emerald-400/70 hover:bg-white/10 hover:shadow-[0_0_0_3px_rgba(52,211,153,0.14),0_18px_42px_-24px_rgba(16,185,129,0.8)] sm:w-[calc((100%_-_1.25rem)/2)] lg:w-[calc((100%_-_2.5rem)/3)] 2xl:w-[calc((100%_-_3.75rem)/4)]"
+                  className="aspect-square w-[82%] shrink-0 snap-start cursor-pointer rounded-[30px] border border-white/10 bg-white/[0.06] p-5 text-left shadow-lg transition duration-200 hover:border-purple-400/70 hover:bg-white/10 hover:shadow-[0_0_0_3px_rgba(64,41,112,0.16),0_18px_42px_-24px_rgba(64,41,112,0.55)] sm:w-[calc((100%_-_1.25rem)/2)] lg:w-[calc((100%_-_2.5rem)/3)] 2xl:w-[calc((100%_-_3.75rem)/4)]"
                 >
-                  <div className="relative flex h-[62%] items-center justify-center overflow-hidden rounded-[22px] text-emerald-300">
+                  <div className="relative flex h-[62%] items-center justify-center overflow-hidden rounded-[22px] text-purple-300">
                     {imageUrl ? (
                       <Image
                         src={imageUrl}
@@ -231,7 +231,7 @@ export function WelcomeScreen({
                       <Icon size={38} strokeWidth={1.5} />
                     )}
                   </div>
-                  <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-emerald-300">
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-purple-300">
                     {suggestion.label}
                   </p>
                   <p className="mt-2 line-clamp-2 text-sm leading-5 text-slate-200">

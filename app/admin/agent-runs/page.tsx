@@ -53,7 +53,7 @@ export default async function AgentRunsPage() {
       <div className="mx-auto max-w-7xl">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="text-sm uppercase tracking-[0.18em] text-emerald-300">
+            <p className="text-sm uppercase tracking-[0.18em] text-purple-300">
               Observability
             </p>
             <h1 className="mt-2 text-3xl font-semibold">Agent Runs</h1>
@@ -82,7 +82,7 @@ export default async function AgentRunsPage() {
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="font-mono text-sm text-emerald-200">
+                      <h2 className="font-mono text-sm text-purple-200">
                         {run.traceId}
                       </h2>
                       <span className="rounded-full bg-white/[0.06] px-2 py-1 text-xs text-slate-300">

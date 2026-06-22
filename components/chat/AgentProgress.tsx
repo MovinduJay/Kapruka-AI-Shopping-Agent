@@ -9,7 +9,7 @@ type Props = {
 
 function statusClasses(status: AgentStepStatus) {
   if (status === "completed") {
-    return "border-emerald-400/40 bg-emerald-500/10 text-emerald-200";
+    return "border-purple-400/40 bg-purple-500/10 text-purple-200";
   }
 
   if (status === "running") {

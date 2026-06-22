@@ -30,7 +30,7 @@ export function SearchProgress({ query = "", steps }: Props) {
       aria-live="polite"
       className="w-fit max-w-full"
     >
-      <div className="inline-flex max-w-full items-center gap-3 rounded-[28px] rounded-bl-md border border-white/[0.06] bg-slate-800 px-5 py-4 shadow-sm">
+      <div className="inline-flex max-w-full items-center gap-2.5 rounded-[22px] rounded-bl-md border border-white/[0.06] bg-slate-800 px-4 py-2.5 shadow-sm">
         <div className="search-wave-dots" aria-hidden="true">
           <span />
           <span />
@@ -38,7 +38,7 @@ export function SearchProgress({ query = "", steps }: Props) {
         </div>
 
         {isShoppingQuery && (
-          <div className="grid min-w-0 overflow-hidden text-base text-slate-300">
+          <div className="grid min-w-0 overflow-hidden text-sm text-slate-300">
             {visibleSteps.map((step, index) => (
               <p
                 key={step}

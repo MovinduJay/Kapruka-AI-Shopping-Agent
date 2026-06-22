@@ -95,7 +95,7 @@ export function LocationPrompt({
         </div>
 
         {location ? (
-          <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-emerald-500/15 px-3 text-xs font-semibold text-emerald-300 sm:h-auto sm:px-4 sm:py-2.5 sm:text-sm">
+          <div className="flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-purple-500/15 px-3 text-xs font-semibold text-purple-300 sm:h-auto sm:px-4 sm:py-2.5 sm:text-sm">
             <Check size={17} />
             Shared
           </div>

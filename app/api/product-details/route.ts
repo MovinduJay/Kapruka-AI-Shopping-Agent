@@ -75,6 +75,7 @@ function textFromHtml(value: string) {
       .replace(/<\/(?:p|li|div|h[1-6]|tr)>/gi, "\n")
       .replace(/<li[^>]*>/gi, "• ")
       .replace(/<[^>]+>/g, " ")
+      .replace(/<\/?[a-z][^>]*$/i, " ")
   )
     .replace(/[ \t]+/g, " ")
     .replace(/ *\n */g, "\n")
@@ -187,10 +188,18 @@ function extractDetailsRegion(html: string) {
 
   if (detailsStart < 0) return "";
 
-  return html.slice(
-    detailsStart,
-    questionsStart > detailsStart ? questionsStart : detailsStart + 30_000
-  );
+  const questionsTagStart =
+    questionsStart > detailsStart
+      ? html.lastIndexOf("<", questionsStart)
+      : -1;
+  const detailsEnd =
+    questionsTagStart > detailsStart
+      ? questionsTagStart
+      : questionsStart > detailsStart
+        ? questionsStart
+        : detailsStart + 30_000;
+
+  return html.slice(detailsStart, detailsEnd);
 }
 
 function extractHighlights(detailsRegion: string) {

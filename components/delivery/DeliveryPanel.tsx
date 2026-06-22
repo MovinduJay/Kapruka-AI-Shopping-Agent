@@ -203,7 +203,7 @@ export function DeliveryPanel({
       >
         <header className="flex items-start justify-between border-b border-white/10 px-6 py-6">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-300">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-purple-300">
               <Truck size={18} />
               Delivery check
             </div>
@@ -229,7 +229,7 @@ export function DeliveryPanel({
           <div className="space-y-5">
             <label className="block">
               <span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-200">
-                <MapPin size={16} className="text-emerald-300" />
+                <MapPin size={16} className="text-purple-300" />
                 Delivery city
               </span>
               <input
@@ -241,19 +241,19 @@ export function DeliveryPanel({
                 }}
                 placeholder="Kandy, Galle, Colombo 03..."
                 autoComplete="address-level2"
-                className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3.5 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-emerald-400/70 focus:ring-4 focus:ring-emerald-500/10"
+                className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3.5 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-purple-400/70 focus:ring-4 focus:ring-purple-500/10"
               />
             </label>
 
             <div>
               <div className="mb-2 flex items-center justify-between gap-3">
                 <span className="flex items-center gap-2 text-sm font-semibold text-slate-200">
-                  <CalendarDays size={16} className="text-emerald-300" />
+                  <CalendarDays size={16} className="text-purple-300" />
                   Delivery date
                 </span>
 
                 {deliveryDate && (
-                  <span className="text-xs font-medium text-emerald-300">
+                  <span className="text-xs font-medium text-purple-300">
                     {formatDate(deliveryDate)}
                   </span>
                 )}
@@ -317,7 +317,7 @@ export function DeliveryPanel({
                         onClick={() => selectDeliveryDate(date)}
                         className={`relative flex aspect-square items-center justify-center rounded-xl text-sm font-medium transition ${
                           isSelected
-                            ? "bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/20"
+                            ? "bg-purple-400 text-slate-950 shadow-lg shadow-purple-500/20"
                             : isPast
                               ? "cursor-not-allowed text-slate-700"
                               : isCurrentMonth
@@ -327,7 +327,7 @@ export function DeliveryPanel({
                       >
                         {date.getDate()}
                         {isToday && !isSelected && (
-                          <span className="absolute bottom-1 h-1 w-1 rounded-full bg-emerald-300" />
+                          <span className="absolute bottom-1 h-1 w-1 rounded-full bg-purple-300" />
                         )}
                       </button>
                     );
@@ -341,7 +341,7 @@ export function DeliveryPanel({
                   <button
                     type="button"
                     onClick={selectToday}
-                    className="rounded-lg px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-400/10"
+                    className="rounded-lg px-3 py-1.5 text-xs font-semibold text-purple-300 transition hover:bg-purple-400/10"
                   >
                     Today
                   </button>
@@ -353,7 +353,7 @@ export function DeliveryPanel({
               type="button"
               onClick={checkDelivery}
               disabled={!city.trim() || !deliveryDate || loading}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {loading ? (
                 <>
@@ -381,7 +381,7 @@ export function DeliveryPanel({
               <div
                 className={`rounded-3xl border p-5 ${
                   result.available
-                    ? "border-emerald-400/30 bg-emerald-500/10"
+                    ? "border-purple-400/30 bg-purple-500/10"
                     : "border-amber-400/30 bg-amber-500/10"
                 }`}
               >
@@ -389,7 +389,7 @@ export function DeliveryPanel({
                   {result.available ? (
                     <CheckCircle2
                       size={24}
-                      className="mt-0.5 shrink-0 text-emerald-300"
+                      className="mt-0.5 shrink-0 text-purple-300"
                     />
                   ) : (
                     <XCircle
@@ -458,7 +458,7 @@ export function DeliveryPanel({
                       <button
                         type="button"
                         onClick={() => onContinueToCheckout(result)}
-                        className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-400"
+                        className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-purple-400"
                       >
                         Continue to checkout details
                       </button>

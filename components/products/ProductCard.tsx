@@ -6,6 +6,7 @@ import {
   ExternalLink,
   ImageIcon,
   ShoppingCart,
+  Star,
 } from "lucide-react";
 import type { ProductCard as ProductCardType } from "@/types/product";
 
@@ -20,10 +21,6 @@ function formatPrice(price: number) {
   return new Intl.NumberFormat("en-LK", {
     maximumFractionDigits: 0,
   }).format(price);
-}
-
-function ratingStarFill(rating: number, index: number) {
-  return Math.max(0, Math.min(1, rating - index)) * 100;
 }
 
 export function ProductCard({
@@ -74,7 +71,7 @@ export function ProductCard({
           onViewDetails(product);
         }
       }}
-      className="product-card group flex h-full cursor-pointer flex-col overflow-hidden rounded-[30px] border border-white/[0.09] bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-2 shadow-none outline-none transition duration-300 hover:-translate-y-0.5 hover:border-emerald-300/70 hover:shadow-[0_8px_20px_-16px_rgba(16,185,129,0.4)] focus-visible:border-emerald-300 focus-visible:ring-4 focus-visible:ring-emerald-500/15"
+      className="product-card group flex h-full cursor-pointer flex-col overflow-hidden rounded-[30px] border border-white/[0.09] bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-2 shadow-none outline-none transition duration-300 hover:-translate-y-0.5 hover:border-purple-300/70 hover:shadow-[0_8px_20px_-16px_rgba(64,41,112,0.35)] focus-visible:border-purple-300 focus-visible:ring-4 focus-visible:ring-purple-500/15"
     >
       <div className="relative aspect-square overflow-hidden rounded-[24px] border border-white/[0.06] bg-slate-900">
         {imageUrl ? (
@@ -95,8 +92,8 @@ export function ProductCard({
         )}
 
         {discountPercentage && (
-          <span className="absolute left-3 top-3 rounded-md bg-rose-500 px-2 py-1 text-[11px] font-bold text-white shadow-sm">
-            {discountPercentage}% off
+          <span className="absolute left-3 top-3 rounded-full bg-rose-500 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-white shadow-lg shadow-rose-950/30">
+            Save {discountPercentage}%
           </span>
         )}
       </div>
@@ -116,7 +113,11 @@ export function ProductCard({
             {product.name}
           </h3>
 
-          {typeof product.rating === "number" && product.rating > 0 && (
+          {typeof product.rating === "number" &&
+            product.rating > 0 &&
+            product.rating <= 5 &&
+            typeof product.reviewCount === "number" &&
+            product.reviewCount > 0 && (
             <div
               className="mt-2 flex items-center gap-1.5 text-sm"
               aria-label={`${product.rating.toFixed(1)} out of 5 stars${
@@ -125,28 +126,12 @@ export function ProductCard({
                   : ""
               }`}
             >
-              <span className="flex items-center gap-0.5" aria-hidden="true">
-                {Array.from({ length: 5 }, (_, index) => {
-                  const fill = ratingStarFill(product.rating!, index);
-
-                  return (
-                    <span
-                      key={index}
-                      className="relative inline-block h-4 w-4 text-base leading-4"
-                    >
-                      <span className="absolute inset-0 text-slate-600">
-                        ★
-                      </span>
-                      <span
-                        className="absolute inset-0 overflow-hidden"
-                        style={{ width: `${fill}%` }}
-                      >
-                        <span className="text-amber-400">★</span>
-                      </span>
-                    </span>
-                  );
-                })}
-              </span>
+              <Star
+                size={16}
+                fill="currentColor"
+                className="text-amber-400"
+                aria-hidden="true"
+              />
               <span className="font-semibold text-slate-200">
                 {product.rating.toFixed(1)}
               </span>
@@ -160,15 +145,27 @@ export function ProductCard({
           )}
 
           <div className="mt-2 flex min-h-8 flex-wrap items-baseline gap-x-2 gap-y-1">
-            <p className="text-xl font-bold text-emerald-300">
+            <p
+              className={`text-xl font-bold ${
+                hasDiscount ? "text-emerald-300" : "text-purple-300"
+              }`}
+            >
+              {hasDiscount && (
+                <span className="mr-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-emerald-400">
+                  Now
+                </span>
+              )}
               {product.price === null
                 ? "Price unavailable"
                 : `Rs. ${formatPrice(product.price)}`}
             </p>
 
             {hasDiscount && (
-              <p className="text-sm text-slate-500 line-through">
-                Rs. {formatPrice(product.compareAtPrice!)}
+              <p className="text-sm font-medium text-slate-500">
+                <span className="mr-1 text-xs uppercase tracking-wide">Was</span>
+                <span className="line-through decoration-rose-400 decoration-2">
+                  Rs. {formatPrice(product.compareAtPrice!)}
+                </span>
               </p>
             )}
           </div>
@@ -186,7 +183,7 @@ export function ProductCard({
                   ? `${product.name} is out of stock`
                   : `Add ${product.name} to cart`
             }
-            className="flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-3 text-sm font-semibold text-white transition hover:bg-emerald-400 disabled:bg-white/[0.07] disabled:text-slate-500"
+            className="flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl bg-purple-500 px-3 text-sm font-semibold text-white transition hover:bg-purple-400 disabled:bg-white/[0.07] disabled:text-slate-500"
           >
             {isInCart ? <Check size={17} /> : <ShoppingCart size={16} />}
             {isInCart ? "In cart" : isOutOfStock ? "Unavailable" : "Add to cart"}
@@ -199,7 +196,7 @@ export function ProductCard({
               rel="noreferrer"
               aria-label={`View ${product.name} on Kapruka`}
               title="View product details on Kapruka"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-slate-300 transition hover:border-emerald-400/40 hover:bg-white/10 hover:text-white"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-slate-300 transition hover:border-purple-400/40 hover:bg-white/10 hover:text-white"
             >
               <ExternalLink size={17} />
             </a>

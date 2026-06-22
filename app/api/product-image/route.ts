@@ -37,25 +37,32 @@ function extractProductImage(html: string) {
 }
 
 async function fetchImage(url: URL) {
-  const response = await fetch(url, {
-    headers: {
-      Accept: "image/avif,image/webp,image/*,*/*;q=0.8",
-      "User-Agent": "Mozilla/5.0 KaprukaAIConcierge/1.0",
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
-  const contentType = response.headers.get("content-type") || "";
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Accept: "image/avif,image/webp,image/*,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 KaprukaAIConcierge/1.0",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(15_000),
+    });
+    const contentType = response.headers.get("content-type") || "";
+    const finalUrl = parseAllowedUrl(response.url);
 
-  if (!response.ok || !contentType.startsWith("image/")) {
+    if (!response.ok || !contentType.startsWith("image/") || !finalUrl) {
+      return null;
+    }
+
+    return new Response(response.body, {
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+      },
+    });
+  } catch {
+    // Let the caller recover from the product page's og:image instead.
     return null;
   }
-
-  return new Response(response.body, {
-    headers: {
-      "Content-Type": contentType,
-      "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
-    },
-  });
 }
 
 export async function GET(request: Request) {

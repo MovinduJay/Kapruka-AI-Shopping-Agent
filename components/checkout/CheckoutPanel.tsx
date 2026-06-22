@@ -169,7 +169,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
       >
         <header className="flex items-start justify-between border-b border-white/10 px-6 py-6">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-emerald-300">
+            <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-purple-300">
               <ShieldCheck size={18} />
               Explicit checkout
             </div>
@@ -200,7 +200,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                 key={label}
                 className={`rounded-2xl border p-3 ${
                   index < 2 || step !== "form"
-                    ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-300"
+                    ? "border-purple-400/30 bg-purple-500/10 text-purple-300"
                     : "border-white/10 bg-white/[0.04] text-slate-400"
                 }`}
               >
@@ -242,7 +242,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                     onChange={(event) =>
                       updateField("recipientName", event.target.value)
                     }
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-emerald-400/70"
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-purple-400/70"
                   />
                 </label>
 
@@ -256,7 +256,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                       updateField("recipientPhone", event.target.value)
                     }
                     placeholder="0771234567 or +94771234567"
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-emerald-400/70"
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-purple-400/70"
                   />
                 </label>
 
@@ -270,7 +270,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                       updateField("address", event.target.value)
                     }
                     rows={3}
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-emerald-400/70"
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-purple-400/70"
                   />
                 </label>
 
@@ -286,7 +286,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                         event.target.value as CheckoutForm["locationType"]
                       )
                     }
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-emerald-400/70"
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-purple-400/70"
                   >
                     <option value="house">House</option>
                     <option value="apartment">Apartment</option>
@@ -306,7 +306,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                     }
                     rows={2}
                     placeholder="Gate code, call before delivery, etc."
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-emerald-400/70"
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-purple-400/70"
                   />
                 </label>
 
@@ -319,7 +319,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                     onChange={(event) =>
                       updateField("senderName", event.target.value)
                     }
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-emerald-400/70"
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-purple-400/70"
                   />
                 </label>
 
@@ -345,7 +345,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                     }
                     rows={2}
                     maxLength={300}
-                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-emerald-400/70"
+                    className="w-full rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm outline-none focus:border-purple-400/70"
                   />
                 </label>
               </div>
@@ -354,7 +354,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                 type="button"
                 onClick={() => setStep("review")}
                 disabled={!canReview}
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <PackageCheck size={18} />
                 Review checkout details
@@ -381,7 +381,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                     <p className="text-sm font-semibold text-white">
                       {item.name}
                     </p>
-                    <p className="mt-1 text-sm text-emerald-300">
+                    <p className="mt-1 text-sm text-purple-300">
                       {item.price === null
                         ? "Price unavailable"
                         : formatMoney(item.price)}
@@ -407,9 +407,9 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                 </div>
               </dl>
 
-              <div className="rounded-3xl border border-emerald-400/30 bg-emerald-500/10 p-5">
+              <div className="rounded-3xl border border-purple-400/30 bg-purple-500/10 p-5">
                 <p className="text-sm text-slate-300">Estimated total</p>
-                <p className="mt-1 text-2xl font-bold text-emerald-300">
+                <p className="mt-1 text-2xl font-bold text-purple-300">
                   {formatMoney(cartTotal + (delivery.fee || 0))}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-slate-400">
@@ -438,7 +438,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                   type="button"
                   onClick={createCheckoutLink}
                   disabled={loading}
-                  className="flex items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {loading ? (
                     <>
@@ -458,9 +458,9 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
 
           {step === "pay" && result && (
             <div className="space-y-5">
-              <div className="rounded-3xl border border-emerald-400/30 bg-emerald-500/10 p-5">
+              <div className="rounded-3xl border border-purple-400/30 bg-purple-500/10 p-5">
                 <div className="flex items-start gap-3">
-                  <CheckCircle2 className="mt-0.5 text-emerald-300" />
+                  <CheckCircle2 className="mt-0.5 text-purple-300" />
                   <div>
                     <h3 className="text-lg font-bold text-white">
                       Checkout link created
@@ -494,7 +494,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                 href={result.checkout_url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-500 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-emerald-400"
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-purple-400"
               >
                 <ExternalLink size={18} />
                 Open secure payment link

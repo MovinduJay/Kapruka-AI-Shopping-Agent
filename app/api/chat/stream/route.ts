@@ -176,6 +176,17 @@ export async function POST(req: Request) {
           data: { label: "Comparing value, stock, and fit" },
         });
 
+        if (data.products?.length) {
+          writer.write({
+            type: "data-result",
+            data: {
+              products: data.products,
+              agentState: data.agentState,
+            },
+          });
+          return;
+        }
+
         const parts = messageParts(data.reply || "");
 
         for (const [partIndex, part] of parts.entries()) {
