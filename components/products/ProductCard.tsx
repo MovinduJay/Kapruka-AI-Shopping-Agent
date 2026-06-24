@@ -92,7 +92,7 @@ export function ProductCard({
         )}
 
         {discountPercentage && (
-          <span className="absolute left-3 top-3 rounded-full bg-rose-500 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-white shadow-lg shadow-rose-950/30">
+          <span className="absolute left-3 top-3 rounded-full bg-purple-500 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-white shadow-lg shadow-purple-950/30">
             Save {discountPercentage}%
           </span>
         )}

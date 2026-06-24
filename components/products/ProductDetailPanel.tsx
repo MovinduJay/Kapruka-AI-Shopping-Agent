@@ -372,7 +372,7 @@ function ProductDetailContent({
                     </p>
                   )}
                   {discountPercentage && (
-                    <span className="mb-0.5 rounded-full bg-rose-500 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-white shadow-sm">
+                    <span className="mb-0.5 rounded-full bg-purple-500 px-2.5 py-1 text-xs font-black uppercase tracking-wide text-white shadow-sm">
                       Save {discountPercentage}%
                     </span>
                   )}
