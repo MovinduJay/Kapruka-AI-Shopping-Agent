@@ -11,7 +11,7 @@ import {
   X,
 } from "lucide-react";
 import type { DeliveryResult } from "@/components/delivery/DeliveryPanel";
-import type { ProductCard as ProductCardType } from "@/types/product";
+import type { CartItem } from "@/types/product";
 
 type CheckoutForm = {
   recipientName: string;
@@ -39,7 +39,7 @@ type CheckoutResult = {
 
 type Props = {
   open: boolean;
-  cart: ProductCardType[];
+  cart: CartItem[];
   delivery: DeliveryResult | null;
   onClose: () => void;
 };
@@ -74,7 +74,10 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
   const [result, setResult] = useState<CheckoutResult | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const cartTotal = cart.reduce((total, item) => total + (item.price || 0), 0);
+  const cartTotal = cart.reduce(
+    (total, item) => total + (item.price || 0) * item.quantity,
+    0
+  );
   const canReview =
     cart.length > 0 &&
     delivery?.available === true &&
@@ -108,7 +111,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
             productId: item.id,
             productUrl: item.productUrl,
             name: item.name,
-            quantity: 1,
+            quantity: item.quantity,
           })),
           recipient: {
             name: form.recipientName,
@@ -384,7 +387,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                     <p className="mt-1 text-sm text-purple-300">
                       {item.price === null
                         ? "Price unavailable"
-                        : formatMoney(item.price)}
+                        : `${item.quantity} × ${formatMoney(item.price)} = ${formatMoney(item.price * item.quantity)}`}
                     </p>
                   </div>
                 ))}

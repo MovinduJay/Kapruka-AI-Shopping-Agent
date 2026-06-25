@@ -15,6 +15,25 @@ type Props = {
   disabled?: boolean;
 };
 
+function searchSubjectFromContext(context: string) {
+  const subject = context
+    .replace(
+      /\b(?:under|below|less than|up to|max(?:imum)?|budget(?: of)?)\s*(?:rs\.?|lkr)?\s*[\d,]+(?:\.\d+)?\s*k?\b/gi,
+      " "
+    )
+    .replace(
+      /^\s*(?:please\s+)?(?:can you\s+)?(?:show me|find me|find|search for|browse for|get me|give me|looking for|look for)\s+/i,
+      ""
+    )
+    .replace(/^\s*(?:i\s+)?(?:need|want)(?:\s+some)?\s+/i, "")
+    .replace(/\b(?:options?|choices?|products?|items?)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[,.:;\s-]+|[,.:;\s-]+$/g, "")
+    .trim();
+
+  return subject || "similar products";
+}
+
 export function ProductCarousel({
   products,
   cartProductIds,
@@ -29,6 +48,7 @@ export function ProductCarousel({
     .map((product) => product.price)
     .filter((price): price is number => typeof price === "number" && price > 0);
   const minimumPrice = prices.length > 0 ? Math.min(...prices) : 0;
+  const searchSubject = searchSubjectFromContext(searchContext);
   const priceThresholds = [
     5_000,
     10_000,
@@ -44,11 +64,11 @@ export function ProductCarousel({
   const followUps = [
     ...priceThresholds.map((threshold) => ({
       label: `Under Rs. ${threshold / 1_000}k`,
-      message: `Under Rs. ${threshold.toLocaleString("en-LK")}, find ${searchContext}`,
+      message: `Show me ${searchSubject} under Rs. ${threshold.toLocaleString("en-LK")}`,
     })),
     {
       label: "Best value",
-      message: `Find the best-value options for ${searchContext}`,
+      message: `Show me the best-value options for ${searchSubject}`,
     },
   ];
 

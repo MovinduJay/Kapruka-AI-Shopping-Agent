@@ -21,6 +21,10 @@ export type ProductCard = {
   rankingReason?: string;
 };
 
+export type CartItem = ProductCard & {
+  quantity: number;
+};
+
 export type ProductQuestion = {
   question: string;
   answer: string;

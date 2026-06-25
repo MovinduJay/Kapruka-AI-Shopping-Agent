@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import {
-  Check,
   ExternalLink,
   ImageIcon,
   ShoppingCart,
@@ -175,18 +174,22 @@ export function ProductCard({
           <button
             type="button"
             onClick={() => onAddToCart(product)}
-            disabled={isInCart || isOutOfStock}
+            disabled={isOutOfStock}
             aria-label={
               isInCart
-                ? `${product.name} is in your cart`
+                ? `Add another ${product.name} to cart`
                 : isOutOfStock
                   ? `${product.name} is out of stock`
                   : `Add ${product.name} to cart`
             }
             className="flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl bg-purple-500 px-3 text-sm font-semibold text-white transition hover:bg-purple-400 disabled:bg-white/[0.07] disabled:text-slate-500"
           >
-            {isInCart ? <Check size={17} /> : <ShoppingCart size={16} />}
-            {isInCart ? "In cart" : isOutOfStock ? "Unavailable" : "Add to cart"}
+            <ShoppingCart size={16} />
+            {isInCart
+              ? "Add another"
+              : isOutOfStock
+                ? "Unavailable"
+                : "Add to cart"}
           </button>
 
           {product.productUrl && (

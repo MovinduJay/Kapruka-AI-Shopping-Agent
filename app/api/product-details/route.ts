@@ -135,6 +135,44 @@ function uniqueImages(values: string[]) {
   return [...unique.values()].slice(0, 12);
 }
 
+function comparableImageToken(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function productImageTokens(productUrl: URL) {
+  const rawProductId = productUrl.pathname.match(/\/kid\/([^/?#]+)/i)?.[1] || "";
+  const normalizedProductId = comparableImageToken(rawProductId);
+  const tokens = new Set<string>();
+
+  if (normalizedProductId.length >= 8) {
+    tokens.add(normalizedProductId);
+    tokens.add(normalizedProductId.replace(/^efpc/, ""));
+    tokens.add(normalizedProductId.replace(/pod(\d+)p?$/i, "p$1"));
+    tokens.add(
+      normalizedProductId.replace(/^efpc/, "").replace(/pod(\d+)p?$/i, "p$1")
+    );
+  }
+
+  const coreMatch = normalizedProductId.match(/[a-z]+0v\d+(?:pod)?\d+p?/i);
+
+  if (coreMatch?.[0]) {
+    const core = coreMatch[0];
+
+    tokens.add(core);
+    tokens.add(core.replace(/pod(\d+)p?$/i, "p$1"));
+  }
+
+  return [...tokens].filter((token) => token.length >= 8);
+}
+
+function imageBelongsToProduct(imageUrl: string, productTokens: string[]) {
+  if (productTokens.length === 0) return true;
+
+  const imageToken = comparableImageToken(imageUrl);
+
+  return productTokens.some((token) => imageToken.includes(token));
+}
+
 function extractName(html: string) {
   const match =
     html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) ||
@@ -146,7 +184,8 @@ function extractName(html: string) {
   return match ? textFromHtml(match[1]).replace(/\s*\|\s*Kapruka.*$/i, "") : null;
 }
 
-function extractImages(html: string) {
+function extractImages(html: string, productUrl: URL) {
+  const productTokens = productImageTokens(productUrl);
   const galleryStart = html.search(/id=["']sync1["']/i);
   const galleryEnd =
     galleryStart >= 0
@@ -165,7 +204,7 @@ function extractImages(html: string) {
     /(?:src|data-src)=["']([^"']+\.(?:avif|gif|jpe?g|png|webp)(?:\?[^"']*)?)["']/gi
   )) {
     const url = normalizeImageUrl(match[1]);
-    if (url) urls.push(url);
+    if (url && imageBelongsToProduct(url, productTokens)) urls.push(url);
   }
 
   const ogImage =
@@ -177,7 +216,12 @@ function extractImages(html: string) {
     );
   const normalizedOgImage = normalizeImageUrl(ogImage?.[1] || "");
 
-  if (normalizedOgImage) urls.unshift(normalizedOgImage);
+  if (
+    normalizedOgImage &&
+    imageBelongsToProduct(normalizedOgImage, productTokens)
+  ) {
+    urls.unshift(normalizedOgImage);
+  }
 
   return uniqueImages(urls);
 }
@@ -300,7 +344,7 @@ export async function GET(request: Request) {
     const details: ProductDetails = {
       name: extractName(html),
       description: extractDescription(detailsRegion),
-      images: extractImages(html),
+      images: extractImages(html, productUrl),
       highlights: extractHighlights(detailsRegion),
       specifications: extractSpecifications(detailsRegion),
       questions: extractQuestions(html),

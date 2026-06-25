@@ -17,8 +17,8 @@ import {
   Shirt,
   ShoppingBasket,
   Send,
-  Sparkles,
 } from "lucide-react";
+import { BrandLogo } from "@/components/brand/BrandLogo";
 
 const suggestions = [
   {
@@ -137,8 +137,8 @@ export function WelcomeScreen({
   return (
     <div className="flex flex-1 items-center overflow-hidden px-4 py-10 font-sans sm:px-6">
       <div className="mx-auto w-full max-w-6xl text-center">
-        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[28px] bg-purple-500 shadow-[0_18px_40px_-24px_rgba(64,41,112,0.8)]">
-          <Sparkles className="text-white" size={40} />
+        <div className="mx-auto flex h-28 w-28 items-center justify-center">
+          <BrandLogo size={112} priority />
         </div>
 
         <h2 className="mt-8 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
@@ -149,8 +149,8 @@ export function WelcomeScreen({
         </p>
 
         <div className="shopping-composer mx-auto mt-8 flex w-full max-w-3xl gap-2 rounded-full border p-2">
-          <div className="shopping-composer-icon flex items-center pl-3">
-            <Sparkles size={20} />
+          <div className="shopping-composer-icon flex items-center pl-1">
+            <BrandLogo size={36} />
           </div>
           <input
             value={input}

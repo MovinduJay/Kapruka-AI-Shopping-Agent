@@ -10,10 +10,10 @@ import {
   PackageCheck,
   ShieldCheck,
   ShoppingCart,
-  Sparkles,
   Star,
   X,
 } from "lucide-react";
+import { BrandLogo } from "@/components/brand/BrandLogo";
 import type { ProductCard, ProductDetails } from "@/types/product";
 
 type Props = {
@@ -185,8 +185,8 @@ function ProductDetailContent({
       >
         <header className="product-detail-header flex items-center justify-between border-b border-white/10 bg-slate-950/90 px-4 py-3 backdrop-blur-xl sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-purple-500/15 text-purple-300">
-              <Sparkles size={19} />
+            <span className="flex h-14 w-14 shrink-0 items-center justify-center">
+              <BrandLogo size={56} />
             </span>
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-300">
@@ -320,7 +320,7 @@ function ProductDetailContent({
 
                 <h2
                   id="product-detail-title"
-                  className="mt-5 text-3xl font-bold leading-tight text-white sm:text-4xl"
+                  className="mt-5 text-lg font-bold leading-7 text-white"
                 >
                   {title}
                 </h2>
@@ -407,12 +407,12 @@ function ProductDetailContent({
                   <button
                     type="button"
                     onClick={() => onAddToCart(product)}
-                    disabled={isInCart || isOutOfStock}
+                    disabled={isOutOfStock}
                     className="flex min-h-13 flex-1 items-center justify-center gap-2 rounded-2xl bg-purple-500 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-purple-400 disabled:bg-white/[0.08] disabled:text-slate-500"
                   >
-                    {isInCart ? <Check size={19} /> : <ShoppingCart size={19} />}
+                    <ShoppingCart size={19} />
                     {isInCart
-                      ? "Already in cart"
+                      ? "Add another"
                       : isOutOfStock
                         ? "Currently unavailable"
                         : "Add to cart"}

@@ -3,15 +3,17 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Copy,
+  Minus,
   Pencil,
+  Plus,
   Moon,
   Send,
   ShoppingCart,
-  Sparkles,
   Sun,
   Trash2,
   X,
 } from "lucide-react";
+import { BrandLogo } from "@/components/brand/BrandLogo";
 import {
   LocationPrompt,
   type SharedLocation,
@@ -30,7 +32,10 @@ import type {
   AgentMemory,
   AgentState,
 } from "@/types/agent";
-import type { ProductCard as ProductCardType } from "@/types/product";
+import type {
+  CartItem,
+  ProductCard as ProductCardType,
+} from "@/types/product";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -43,7 +48,7 @@ type ChatStreamPart = {
   type: string;
   delta?: string;
   data?: Pick<AgentChatResponse, "products" | "agentState"> & {
-    label?: string;
+    content?: string;
   };
   errorText?: string;
 };
@@ -168,12 +173,12 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const sendingRef = useRef(false);
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [activeProgressSteps, setActiveProgressSteps] = useState<string[]>([]);
   const [chatStarted, setChatStarted] = useState(false);
-  const [cart, setCart] = useState<ProductCardType[]>([]);
+  const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedProduct, setSelectedProduct] =
     useState<ProductCardType | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
@@ -225,11 +230,14 @@ export default function Home() {
 
   function addToCart(product: ProductCardType) {
     setCart((prev) => {
-      const exists = prev.some((item) => item.id === product.id);
-
-      if (exists) return prev;
-
-      const next = [...prev, product];
+      const existing = prev.find((item) => item.id === product.id);
+      const next = existing
+        ? prev.map((item) =>
+            item.id === product.id
+              ? { ...item, quantity: Math.min(item.quantity + 1, 99) }
+              : item
+          )
+        : [...prev, { ...product, quantity: 1 }];
 
       postObservabilityEvent("/api/observability/product-interaction", {
         product,
@@ -237,6 +245,24 @@ export default function Home() {
       });
       postObservabilityEvent("/api/observability/cart", { cart: next });
 
+      return next;
+    });
+  }
+
+  function changeCartQuantity(productId: string, change: number) {
+    setCart((prev) => {
+      const next = prev
+        .map((item) =>
+          item.id === productId
+            ? {
+                ...item,
+                quantity: Math.min(Math.max(item.quantity + change, 0), 99),
+              }
+            : item
+        )
+        .filter((item) => item.quantity > 0);
+
+      postObservabilityEvent("/api/observability/cart", { cart: next });
       return next;
     });
   }
@@ -290,7 +316,9 @@ export default function Home() {
   async function sendMessage(message?: string) {
     const userMessage = (message ?? input).trim();
 
-    if (!userMessage || loading) return;
+    if (!userMessage || loading || sendingRef.current) return;
+
+    sendingRef.current = true;
 
     const requestHistory = messages.slice(-8).map(({ role, content }) => ({
       role,
@@ -313,7 +341,6 @@ export default function Home() {
 
     setInput("");
     setLoading(true);
-    setActiveProgressSteps(["Reading the request"]);
 
     try {
       const memory = loadAgentMemory();
@@ -386,21 +413,15 @@ export default function Home() {
           });
         }
 
-        if (part.type === "data-message-break") {
+        if (part.type === "data-message-part" && part.data?.content) {
           setMessages((prev) => [
             ...prev,
             {
               role: "assistant",
-              content: "",
+              content: part.data!.content!,
               products: [],
             },
           ]);
-        }
-
-        if (part.type === "data-progress" && part.data?.label) {
-          setActiveProgressSteps((prev) =>
-            [...new Set([...prev, part.data!.label!])].slice(-4)
-          );
         }
 
         if (part.type === "error") {
@@ -463,19 +484,30 @@ export default function Home() {
         ];
       });
     } finally {
+      sendingRef.current = false;
       setLoading(false);
-      setActiveProgressSteps([]);
     }
   }
 
   const cartTotal = cart.reduce(
-    (total, item) => total + (item.price || 0),
+    (total, item) => total + (item.price || 0) * item.quantity,
     0
   );
+  const cartQuantity = cart.reduce((total, item) => total + item.quantity, 0);
   const isWelcome = !chatStarted && !loading;
   const latestUserMessage =
     [...messages].reverse().find((message) => message.role === "user")
       ?.content || "";
+
+  function userMessageBefore(messageIndex: number) {
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+
+      if (message.role === "user") return message.content;
+    }
+
+    return latestUserMessage;
+  }
 
   function assistantGroupContent(messageIndex: number) {
     let startIndex = messageIndex;
@@ -540,8 +572,8 @@ export default function Home() {
         <header className="border-b border-white/10 px-4 py-4 sm:px-6">
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3">
-              <div className="shrink-0 rounded-2xl bg-purple-500/20 p-3">
-                <Sparkles className="text-purple-300" size={24} />
+              <div className="shrink-0">
+                <BrandLogo size={64} priority />
               </div>
 
               <div className="min-w-0">
@@ -569,7 +601,7 @@ export default function Home() {
               <button
                 type="button"
                 onClick={() => setCartOpen(true)}
-                aria-label={`Open cart with ${cart.length} items`}
+                aria-label={`Open cart with ${cartQuantity} items`}
                 className="group relative flex shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3.5 py-3 text-sm font-semibold text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-purple-400/60 hover:bg-purple-500/15 hover:shadow-[0_12px_30px_-14px_rgba(64,41,112,0.55)] active:translate-y-0 active:scale-95"
               >
                 <ShoppingCart
@@ -577,9 +609,9 @@ export default function Home() {
                   className="transition-transform duration-200 group-hover:scale-110"
                 />
                 <span className="hidden sm:inline">Cart</span>
-                {cart.length > 0 && (
+                {cartQuantity > 0 && (
                   <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-purple-500 px-1.5 text-xs font-bold text-white">
-                    {cart.length}
+                    {cartQuantity}
                   </span>
                 )}
               </button>
@@ -600,7 +632,7 @@ export default function Home() {
           className="flex-1 overflow-y-auto"
           onScroll={(event) => updateComposerGlass(event.currentTarget)}
         >
-          <div className="mx-auto w-full max-w-6xl space-y-4 px-4 pb-40 pt-6 sm:px-6 sm:pb-44">
+          <div className="mx-auto w-full max-w-6xl px-4 pb-40 pt-6 sm:px-6 sm:pb-44">
             {messages.map((message, index) => {
               const previousMessage = messages[index - 1];
               const nextMessage = messages[index + 1];
@@ -621,12 +653,22 @@ export default function Home() {
               const hasVisibleProducts =
                 message.products?.length || groupProducts.length;
 
+              if (
+                message.role === "assistant" &&
+                !message.content.trim() &&
+                !hasVisibleProducts
+              ) {
+                return null;
+              }
+
               return (
               <div
                 key={index}
                 className={`flex ${
                   message.role === "user" ? "justify-end" : "justify-start"
-                } ${isGroupedAssistant ? "!mt-0.5" : ""}`}
+                } ${
+                  index === 0 ? "" : isGroupedAssistant ? "mt-1" : "mt-4"
+                }`}
               >
                 <div
                   className={
@@ -636,7 +678,7 @@ export default function Home() {
                   }
                 >
                   {message.role === "assistant" ? (
-                    <div className="space-y-1.5">
+                    <div className="space-y-1">
                       {splitAssistantContent(message.content).map(
                         (part, partIndex) => (
                           <div
@@ -698,6 +740,9 @@ export default function Home() {
                         cartProductIds={cart.map((item) => item.id)}
                         onAddToCart={addToCart}
                         onViewDetails={viewProductDetails}
+                        onFollowUp={sendMessage}
+                        searchContext={userMessageBefore(index)}
+                        disabled={loading}
                       />
                     )}
                 </div>
@@ -706,10 +751,7 @@ export default function Home() {
             })}
 
             {loading && (
-              <SearchProgress
-                query={latestUserMessage}
-                steps={activeProgressSteps}
-              />
+              <SearchProgress />
             )}
           </div>
         </div>
@@ -719,7 +761,12 @@ export default function Home() {
             {!loading &&
               !locationPromptDismissed &&
               !sharedLocation &&
-              messages.some((message) => message.role === "user") && (
+              (selectedProduct !== null ||
+                cart.length > 0 ||
+                messages[messages.length - 1]?.agentState?.intent ===
+                  "delivery" ||
+                messages[messages.length - 1]?.agentState?.intent ===
+                  "checkout") && (
                 <div className="pointer-events-auto">
                   <LocationPrompt
                     location={sharedLocation}
@@ -733,14 +780,14 @@ export default function Home() {
               )}
 
             <div
-              className={`pointer-events-auto flex gap-2 rounded-[28px] border border-white/15 p-2.5 transition duration-200 ${
+              className={`shopping-composer pointer-events-auto flex gap-2 rounded-[28px] border p-2.5 ${
                 composerGlass
-                  ? "bg-slate-900/35 shadow-[0_16px_45px_-22px_rgba(0,0,0,0.95)] backdrop-blur-2xl backdrop-saturate-150"
-                  : "bg-slate-900"
+                  ? "backdrop-blur-2xl backdrop-saturate-150"
+                  : ""
               }`}
             >
-              <div className="flex items-center pl-2 text-purple-300">
-                <Sparkles size={19} />
+              <div className="shopping-composer-icon flex items-center pl-1">
+                <BrandLogo size={34} />
               </div>
 
               <input
@@ -753,7 +800,7 @@ export default function Home() {
                   }
                 }}
                 placeholder="Search products, compare options, or describe what you need"
-                className="min-w-0 flex-1 bg-transparent px-3 text-md outline-none placeholder:text-slate-500"
+                className="shopping-composer-input min-w-0 flex-1 bg-transparent px-3 text-md outline-none"
               />
 
               <button
@@ -761,7 +808,7 @@ export default function Home() {
                 onClick={() => sendMessage()}
                 disabled={loading}
                 aria-label="Send message"
-                className="rounded-xl bg-purple-500 px-3.5 py-2.5 text-sm font-semibold hover:bg-purple-400 disabled:opacity-50"
+                className="shopping-composer-send flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
               >
                 <Send size={18} />
               </button>
@@ -822,8 +869,30 @@ export default function Home() {
                           {item.name}
                         </h3>
                         <p className="mt-1 text-sm font-bold text-purple-300">
-                          Rs. {item.price?.toLocaleString() ?? "N/A"}
+                          Rs. {((item.price || 0) * item.quantity).toLocaleString()}
                         </p>
+                        <div className="mt-3 flex w-fit items-center rounded-full border border-white/10 bg-white/[0.04]">
+                          <button
+                            type="button"
+                            onClick={() => changeCartQuantity(item.id, -1)}
+                            aria-label={`Decrease ${item.name} quantity`}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white"
+                          >
+                            <Minus size={14} />
+                          </button>
+                          <span className="min-w-8 text-center text-sm font-semibold text-white">
+                            {item.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => changeCartQuantity(item.id, 1)}
+                            disabled={item.quantity >= 99}
+                            aria-label={`Increase ${item.name} quantity`}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-40"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
                       </div>
 
                       <button
