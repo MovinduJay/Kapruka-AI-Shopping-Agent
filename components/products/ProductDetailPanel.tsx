@@ -7,8 +7,6 @@ import {
   ChevronRight,
   ExternalLink,
   ImageIcon,
-  PackageCheck,
-  ShieldCheck,
   ShoppingCart,
   Star,
   X,
@@ -296,34 +294,12 @@ function ProductDetailContent({
 
             <div className="product-detail-info bg-slate-950 px-5 py-7 sm:px-8 sm:py-9">
               <div className="mx-auto max-w-2xl">
-                <div className="flex flex-wrap gap-2">
-                  {product.brand && (
-                    <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs font-semibold text-slate-300">
-                      {product.brand}
-                    </span>
-                  )}
-                  {product.category && (
-                    <span className="rounded-full border border-white/10 bg-white/[0.05] px-3 py-1.5 text-xs font-semibold text-slate-300">
-                      {product.category}
-                    </span>
-                  )}
-                  <span
-                    className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                      isOutOfStock
-                        ? "bg-rose-500/15 text-rose-300"
-                        : "bg-purple-500/15 text-purple-300"
-                    }`}
-                  >
-                    {isOutOfStock ? "Currently unavailable" : "Available to order"}
-                  </span>
-                </div>
-
-                <h2
+                <h1
                   id="product-detail-title"
-                  className="mt-5 text-lg font-bold leading-7 text-white"
+                  className="text-xl font-bold leading-7 text-white"
                 >
                   {title}
-                </h2>
+                </h1>
 
                 {typeof product.rating === "number" &&
                   product.rating > 0 &&
@@ -376,31 +352,6 @@ function ProductDetailContent({
                       Save {discountPercentage}%
                     </span>
                   )}
-                </div>
-
-                <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                  <div className="flex gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                    <PackageCheck className="shrink-0 text-purple-300" size={21} />
-                    <div>
-                      <p className="text-sm font-semibold text-white">
-                        Kapruka marketplace
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-slate-400">
-                        Availability and delivery are confirmed during checkout.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                    <ShieldCheck className="shrink-0 text-purple-300" size={21} />
-                    <div>
-                      <p className="text-sm font-semibold text-white">
-                        Real product page
-                      </p>
-                      <p className="mt-1 text-xs leading-5 text-slate-400">
-                        Details and images are loaded directly from Kapruka.
-                      </p>
-                    </div>
-                  </div>
                 </div>
 
                 <div className="mt-6 flex flex-col gap-3 sm:flex-row">

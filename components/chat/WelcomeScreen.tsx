@@ -137,11 +137,11 @@ export function WelcomeScreen({
   return (
     <div className="flex flex-1 items-center overflow-hidden px-4 py-10 font-sans sm:px-6">
       <div className="mx-auto w-full max-w-6xl text-center">
-        <div className="mx-auto flex h-28 w-28 items-center justify-center">
-          <BrandLogo size={112} priority />
+        <div className="mx-auto flex h-40 w-40 items-center justify-center drop-shadow-[0_24px_42px_rgba(64,41,112,0.22)] sm:h-48 sm:w-48">
+          <BrandLogo size={192} priority />
         </div>
 
-        <h2 className="mt-8 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
+        <h2 className="mt-2 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
           Shop across Kapruka.
         </h2>
         <p className="mx-auto mt-3 max-w-2xl text-xl tracking-[-0.02em] text-slate-300 sm:text-3xl">

@@ -43,14 +43,16 @@ button:disabled,
 
 .shopping-composer {
   background: #f8fafc;
-  border-color: rgb(64 41 112 / 0.3);
+  border-color: rgb(64 41 112 / 0.24);
   color: #172033;
-  box-shadow: 0 12px 38px -24px rgb(64 41 112 / 0.45);
+  box-shadow:
+    0 10px 30px -24px rgb(64 41 112 / 0.35),
+    inset 0 0 0 0 rgb(64 41 112 / 0);
   transition:
-    background-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 280ms ease,
-    box-shadow 280ms ease,
-    transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+    background-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 260ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .shopping-composer:focus-within {
@@ -58,7 +60,11 @@ button:disabled,
   border-color: #402970;
   color: #172033;
   outline: none;
-  box-shadow: 0 12px 38px -24px rgb(64 41 112 / 0.45);
+  transform: translateY(-1px);
+  box-shadow:
+    0 18px 46px -28px rgb(64 41 112 / 0.7),
+    0 0 24px -18px rgb(64 41 112 / 0.9),
+    inset 0 0 0 1px rgb(64 41 112 / 0.18);
 }
 
 .shopping-composer-icon {

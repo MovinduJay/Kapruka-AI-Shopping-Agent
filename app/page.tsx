@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Copy,
+  ImageIcon,
   Minus,
   Pencil,
   Plus,
@@ -78,6 +79,103 @@ function getServerThemeSnapshot(): Theme {
 function saveTheme(theme: Theme) {
   window.localStorage.setItem("kapruka-theme", theme);
   window.dispatchEvent(new Event("kapruka-theme-change"));
+}
+
+function getProductImageUrl(product: ProductCardType) {
+  if (!product.imageUrl && !product.productUrl) return null;
+
+  return `/api/product-image?${new URLSearchParams({
+    ...(product.imageUrl ? { src: product.imageUrl } : {}),
+    ...(product.productUrl ? { product: product.productUrl } : {}),
+  }).toString()}`;
+}
+
+type CartItemRowProps = {
+  item: CartItem;
+  onChangeQuantity: (productId: string, change: number) => void;
+  onRemove: (productId: string) => void;
+};
+
+function CartItemRow({ item, onChangeQuantity, onRemove }: CartItemRowProps) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const imageUrl = imageFailed ? null : getProductImageUrl(item);
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+      <div className="flex items-start gap-3">
+        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-slate-900">
+          {imageUrl ? (
+            // Images are already normalized through the local product-image proxy.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={imageUrl}
+              alt={item.name}
+              loading="lazy"
+              onError={() => setImageFailed(true)}
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-slate-500">
+              <ImageIcon size={24} aria-hidden="true" />
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              {(item.brand || item.category) && (
+                <p className="truncate text-xs font-medium text-slate-400">
+                  {item.brand || item.category}
+                </p>
+              )}
+              <h3 className="mt-0.5 line-clamp-2 text-sm font-semibold leading-5 text-white">
+                {item.name}
+              </h3>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onRemove(item.id)}
+              aria-label={`Remove ${item.name} from cart`}
+              className="shrink-0 rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <div className="flex w-fit items-center rounded-full border border-white/10 bg-white/[0.04]">
+              <button
+                type="button"
+                onClick={() => onChangeQuantity(item.id, -1)}
+                aria-label={`Decrease ${item.name} quantity`}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white"
+              >
+                <Minus size={14} />
+              </button>
+              <span className="min-w-8 text-center text-sm font-semibold text-white">
+                {item.quantity}
+              </span>
+              <button
+                type="button"
+                onClick={() => onChangeQuantity(item.id, 1)}
+                disabled={item.quantity >= 99}
+                aria-label={`Increase ${item.name} quantity`}
+                className="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-40"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+
+            <p className="shrink-0 text-lg font-bold leading-none text-purple-300">
+              Rs. {((item.price || 0) * item.quantity).toLocaleString()}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const agentMemoryKey = "kapruka-agent-memory";
@@ -800,7 +898,7 @@ export default function Home() {
                   }
                 }}
                 placeholder="Search products, compare options, or describe what you need"
-                className="shopping-composer-input min-w-0 flex-1 bg-transparent px-3 text-md outline-none"
+                className="shopping-composer-input min-w-0 flex-1 bg-transparent px-3 text-lg outline-none"
               />
 
               <button
@@ -859,52 +957,12 @@ export default function Home() {
                 </div>
               ) : (
                 cart.map((item) => (
-                  <div
+                  <CartItemRow
                     key={item.id}
-                    className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold text-white">
-                          {item.name}
-                        </h3>
-                        <p className="mt-1 text-sm font-bold text-purple-300">
-                          Rs. {((item.price || 0) * item.quantity).toLocaleString()}
-                        </p>
-                        <div className="mt-3 flex w-fit items-center rounded-full border border-white/10 bg-white/[0.04]">
-                          <button
-                            type="button"
-                            onClick={() => changeCartQuantity(item.id, -1)}
-                            aria-label={`Decrease ${item.name} quantity`}
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white"
-                          >
-                            <Minus size={14} />
-                          </button>
-                          <span className="min-w-8 text-center text-sm font-semibold text-white">
-                            {item.quantity}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => changeCartQuantity(item.id, 1)}
-                            disabled={item.quantity >= 99}
-                            aria-label={`Increase ${item.name} quantity`}
-                            className="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 hover:bg-white/10 hover:text-white disabled:opacity-40"
-                          >
-                            <Plus size={14} />
-                          </button>
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => removeFromCart(item.id)}
-                        aria-label={`Remove ${item.name} from cart`}
-                        className="rounded-lg p-2 text-slate-400 hover:bg-white/10 hover:text-white"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </div>
+                    item={item}
+                    onChangeQuantity={changeCartQuantity}
+                    onRemove={removeFromCart}
+                  />
                 ))
               )}
             </div>

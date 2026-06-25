@@ -37,6 +37,16 @@ type DeliveryCheckResponse = {
   perishable_warning?: string | null;
 };
 
+type DeliveryAvailabilityDate = {
+  date: string;
+  available: boolean;
+  fee: number | null;
+  currency: string;
+  reason: string | null;
+  earliestDate: string | null;
+  warning: string | null;
+};
+
 const MCP_URL =
   process.env.KAPRUKA_MCP_URL || "https://mcp.kapruka.com/mcp";
 
@@ -190,6 +200,188 @@ function selectCanonicalCity(cities: DeliveryCity[], requestedCity: string) {
   );
 }
 
+function isDateValue(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function addDays(value: string, days: number) {
+  const date = new Date(`${value}T12:00:00+05:30`);
+  date.setDate(date.getDate() + days);
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getDateRange(start: string, end: string) {
+  const dates: string[] = [];
+  let current = start;
+
+  while (current <= end && dates.length < 45) {
+    dates.push(current);
+    current = addDays(current, 1);
+  }
+
+  return dates;
+}
+
+async function getCanonicalCity(
+  headers: Record<string, string>,
+  city: string,
+  limit = 10
+) {
+  const citiesResult = await callMcpTool(
+    headers,
+    2,
+    "kapruka_list_delivery_cities",
+    {
+      query: city,
+      limit,
+      response_format: "json",
+    }
+  );
+  const cities = parseToolJson<DeliveryCitiesResponse>(citiesResult).cities;
+
+  return selectCanonicalCity(cities || [], city);
+}
+
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const query = searchParams.get("query")?.trim() || "";
+    const start = searchParams.get("start")?.trim() || "";
+    const end = searchParams.get("end")?.trim() || "";
+    const productId = searchParams.get("productId")?.trim() || null;
+
+    if (query.length < 1) {
+      return Response.json({ cities: [] });
+    }
+
+    const headers = await startMcpSession();
+
+    if (start || end) {
+      if (query.length < 2) {
+        return Response.json(
+          { error: "Enter a delivery city or overseas destination." },
+          { status: 400 }
+        );
+      }
+
+      if (!isDateValue(start) || !isDateValue(end) || end < start) {
+        return Response.json(
+          { error: "Choose a valid delivery date range." },
+          { status: 400 }
+        );
+      }
+
+      const minimumDate = getSriLankaDate();
+      const dates = getDateRange(start < minimumDate ? minimumDate : start, end);
+      const canonicalCity = await getCanonicalCity(headers, query);
+
+      if (!canonicalCity) {
+        return Response.json({
+          city: query,
+          dates: dates.map<DeliveryAvailabilityDate>((date) => ({
+            date,
+            available: false,
+            fee: null,
+            currency: "LKR",
+            reason: `Kapruka does not recognize "${query}" as a delivery destination.`,
+            earliestDate: null,
+            warning: null,
+          })),
+        });
+      }
+
+      const datesWithAvailability: DeliveryAvailabilityDate[] = [];
+
+      for (let index = 0; index < dates.length; index += 4) {
+        const batch = dates.slice(index, index + 4);
+        const batchAvailability = await Promise.all(
+          batch.map(async (date, batchIndex) => {
+            const deliveryResult = await callMcpTool(
+              headers,
+              index + batchIndex + 3,
+              "kapruka_check_delivery",
+              {
+                city: canonicalCity.name,
+                delivery_date: date,
+                product_id:
+                  productId && productId.length >= 3 && productId.length <= 80
+                    ? productId
+                    : null,
+                response_format: "json",
+              }
+            );
+            const delivery =
+              parseToolJson<DeliveryCheckResponse>(deliveryResult);
+
+            return {
+              date: delivery.checked_date || date,
+              available: delivery.available === true,
+              fee: typeof delivery.rate === "number" ? delivery.rate : null,
+              currency: delivery.currency || "LKR",
+              reason: delivery.reason || null,
+              earliestDate: delivery.next_available_date || null,
+              warning: delivery.perishable_warning || null,
+            };
+          })
+        );
+
+        datesWithAvailability.push(...batchAvailability);
+      }
+
+      return Response.json({
+        city: canonicalCity.name,
+        dates: datesWithAvailability,
+      });
+    }
+
+    const citiesResult = await callMcpTool(
+      headers,
+      2,
+      "kapruka_list_delivery_cities",
+      {
+        query,
+        limit: 8,
+        response_format: "json",
+      }
+    );
+    const cities = parseToolJson<DeliveryCitiesResponse>(citiesResult).cities;
+
+    return Response.json({ cities: cities || [] });
+  } catch (error) {
+    const { searchParams } = new URL(request.url);
+    const query = searchParams.get("query")?.trim() || "";
+    const isRangeLookup =
+      Boolean(searchParams.get("start")) || Boolean(searchParams.get("end"));
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Could not load delivery cities right now.";
+
+    console.warn("Delivery lookup error:", error);
+
+    if (isRangeLookup) {
+      return Response.json({
+        city: query,
+        dates: [],
+        error: message,
+      });
+    }
+
+    return Response.json(
+      {
+        error: message,
+        cities: [],
+      },
+      { status: 502 }
+    );
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
@@ -210,12 +402,12 @@ export async function POST(request: Request) {
 
     if (city.length < 2) {
       return Response.json(
-        { error: "Enter a delivery city." },
+        { error: "Enter a delivery city or overseas destination." },
         { status: 400 }
       );
     }
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(deliveryDate)) {
+    if (!isDateValue(deliveryDate)) {
       return Response.json(
         { error: "Choose a valid delivery date." },
         { status: 400 }
@@ -230,18 +422,7 @@ export async function POST(request: Request) {
     }
 
     const headers = await startMcpSession();
-    const citiesResult = await callMcpTool(
-      headers,
-      2,
-      "kapruka_list_delivery_cities",
-      {
-        query: city,
-        limit: 10,
-        response_format: "json",
-      }
-    );
-    const cities = parseToolJson<DeliveryCitiesResponse>(citiesResult).cities;
-    const canonicalCity = selectCanonicalCity(cities || [], city);
+    const canonicalCity = await getCanonicalCity(headers, city);
 
     if (!canonicalCity) {
       return Response.json({
@@ -251,7 +432,7 @@ export async function POST(request: Request) {
           available: false,
           fee: null,
           currency: "LKR",
-          reason: `Kapruka does not recognize "${city}" as a delivery city.`,
+          reason: `Kapruka does not recognize "${city}" as a delivery destination.`,
           earliestDate: null,
           warning: null,
         },
