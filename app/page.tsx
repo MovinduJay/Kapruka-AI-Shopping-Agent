@@ -2,8 +2,11 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  Clock,
   Copy,
+  History,
   ImageIcon,
+  Menu,
   Minus,
   Pencil,
   Plus,
@@ -43,6 +46,15 @@ type ChatMessage = {
   content: string;
   products?: ProductCardType[];
   agentState?: AgentState;
+};
+
+type SavedShoppingChat = {
+  id: string;
+  title: string;
+  updatedAt: number;
+  messages: ChatMessage[];
+  cart: CartItem[];
+  checkedDelivery: DeliveryResult | null;
 };
 
 type ChatStreamPart = {
@@ -178,8 +190,153 @@ function CartItemRow({ item, onChangeQuantity, onRemove }: CartItemRowProps) {
   );
 }
 
+type SavedChatCardProps = {
+  chat: SavedShoppingChat;
+  active: boolean;
+  onOpen: (chat: SavedShoppingChat) => void;
+};
+
+function SavedChatCard({ chat, active, onOpen }: SavedChatCardProps) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const imageProduct = getSavedChatImageProduct(chat);
+  const imageUrl =
+    !imageFailed && imageProduct ? getProductImageUrl(imageProduct) : null;
+  const cartQuantity = chat.cart.reduce((total, item) => total + item.quantity, 0);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(chat)}
+      className={`group w-full rounded-3xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-purple-300/70 hover:shadow-[0_16px_42px_-28px_rgba(64,41,112,0.7)] ${
+        active
+          ? "border-purple-300/60 bg-purple-500/10"
+          : "border-white/10 bg-white/[0.045]"
+      }`}
+    >
+      <div className="flex gap-3">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <h3 className="line-clamp-3 text-sm font-bold leading-6 text-white">
+            {chat.title}
+          </h3>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+            <span className="inline-flex items-center gap-1">
+              <Clock size={13} />
+              {formatSavedChatAge(chat.updatedAt)}
+            </span>
+            {cartQuantity > 0 && (
+              <span className="rounded-full bg-purple-500/15 px-2 py-0.5 font-semibold text-purple-300">
+                {cartQuantity} in cart
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-slate-900">
+          {imageUrl ? (
+            // Images are already normalized through the local product-image proxy.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={imageUrl}
+              alt=""
+              loading="lazy"
+              onError={() => setImageFailed(true)}
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-slate-500">
+              <History size={24} />
+            </div>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 const agentMemoryKey = "kapruka-agent-memory";
 const agentRunsKey = "kapruka-agent-runs";
+const savedChatsKey = "kapruka-saved-shopping-chats";
+
+function createChatId() {
+  return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getSavedChatTitle(messages: ChatMessage[]) {
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  const title = firstUserMessage?.content.trim();
+
+  if (!title) return "New shopping chat";
+
+  return title.length > 88 ? `${title.slice(0, 85)}...` : title;
+}
+
+function loadSavedChats(): SavedShoppingChat[] {
+  try {
+    const raw = window.localStorage.getItem(savedChatsKey);
+    const parsed = raw ? (JSON.parse(raw) as SavedShoppingChat[]) : [];
+
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((chat) => chat && typeof chat.id === "string")
+          .slice(0, 20)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveShoppingChats(chats: SavedShoppingChat[]) {
+  window.localStorage.setItem(savedChatsKey, JSON.stringify(chats.slice(0, 20)));
+}
+
+function updateSavedChatSnapshot(
+  chatId: string,
+  snapshot: Omit<SavedShoppingChat, "id" | "updatedAt">
+) {
+  const saved = loadSavedChats();
+  const next = [
+    {
+      id: chatId,
+      updatedAt: Date.now(),
+      ...snapshot,
+    },
+    ...saved.filter((chat) => chat.id !== chatId),
+  ].slice(0, 20);
+
+  saveShoppingChats(next);
+  postObservabilityEvent("/api/saved-chats", {
+    id: chatId,
+    ...snapshot,
+  });
+  return next;
+}
+
+function formatSavedChatAge(updatedAt: number) {
+  const diff = Date.now() - updatedAt;
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diff < hour) return `${Math.max(1, Math.round(diff / minute))}m ago`;
+  if (diff < day) return `${Math.round(diff / hour)}h ago`;
+  return `${Math.round(diff / day)}d ago`;
+}
+
+function getSavedChatImageProduct(chat: SavedShoppingChat) {
+  const cartProduct = chat.cart.find((item) => item.imageUrl || item.productUrl);
+
+  if (cartProduct) return cartProduct;
+
+  for (let index = chat.messages.length - 1; index >= 0; index -= 1) {
+    const product = chat.messages[index].products?.find(
+      (item) => item.imageUrl || item.productUrl
+    );
+
+    if (product) return product;
+  }
+
+  return null;
+}
 
 function loadAgentMemory(): AgentMemory {
   try {
@@ -277,6 +434,11 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [chatStarted, setChatStarted] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [activeChatId, setActiveChatId] = useState(() => createChatId());
+  const [savedChats, setSavedChats] = useState<SavedShoppingChat[]>([]);
+  const [savedChatsLoaded, setSavedChatsLoaded] = useState(false);
+  const [savedChatsOpen, setSavedChatsOpen] = useState(false);
+  const [savedChatsClosing, setSavedChatsClosing] = useState(false);
   const [selectedProduct, setSelectedProduct] =
     useState<ProductCardType | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
@@ -299,9 +461,35 @@ export default function Home() {
   }, [theme]);
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setSavedChats(loadSavedChats());
+      setSavedChatsLoaded(true);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  useEffect(() => {
     window.localStorage.removeItem(agentMemoryKey);
     window.localStorage.removeItem(agentRunsKey);
   }, []);
+
+  useEffect(() => {
+    if (!chatStarted && messages.length === 0 && cart.length === 0) return;
+
+    const saved = loadSavedChats();
+    saveShoppingChats([
+      {
+        id: activeChatId,
+        title: getSavedChatTitle(messages),
+        updatedAt: Date.now(),
+        messages,
+        cart,
+        checkedDelivery,
+      },
+      ...saved.filter((chat) => chat.id !== activeChatId),
+    ]);
+  }, [activeChatId, cart, chatStarted, checkedDelivery, messages]);
 
   useEffect(() => {
     const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
@@ -326,6 +514,25 @@ export default function Home() {
     };
   }, [messages, loading]);
 
+  function persistActiveChatSnapshot(
+    nextMessages: ChatMessage[] = messages,
+    nextCart: CartItem[] = cart,
+    nextDelivery: DeliveryResult | null = checkedDelivery
+  ) {
+    if (!chatStarted && nextMessages.length === 0 && nextCart.length === 0) {
+      return;
+    }
+
+    setSavedChats(
+      updateSavedChatSnapshot(activeChatId, {
+        title: getSavedChatTitle(nextMessages),
+        messages: nextMessages,
+        cart: nextCart,
+        checkedDelivery: nextDelivery,
+      })
+    );
+  }
+
   function addToCart(product: ProductCardType) {
     setCart((prev) => {
       const existing = prev.find((item) => item.id === product.id);
@@ -342,6 +549,7 @@ export default function Home() {
         action: "add_to_cart",
       });
       postObservabilityEvent("/api/observability/cart", { cart: next });
+      persistActiveChatSnapshot(messages, next);
 
       return next;
     });
@@ -361,6 +569,7 @@ export default function Home() {
         .filter((item) => item.quantity > 0);
 
       postObservabilityEvent("/api/observability/cart", { cart: next });
+      persistActiveChatSnapshot(messages, next);
       return next;
     });
   }
@@ -378,6 +587,7 @@ export default function Home() {
       }
 
       postObservabilityEvent("/api/observability/cart", { cart: next });
+      persistActiveChatSnapshot(messages, next);
 
       return next;
     });
@@ -411,6 +621,69 @@ export default function Home() {
     });
   }
 
+  function openSavedChat(chat: SavedShoppingChat) {
+    setActiveChatId(chat.id);
+    setMessages(chat.messages || []);
+    setCart(chat.cart || []);
+    setCheckedDelivery(chat.checkedDelivery || null);
+    setChatStarted((chat.messages || []).length > 0);
+    setInput("");
+    setLoading(false);
+    setSavedChatsOpen(false);
+    setSavedChatsClosing(false);
+    setCartOpen(false);
+    setDeliveryPanelOpen(false);
+    setCheckoutPanelOpen(false);
+    setSelectedProduct(null);
+  }
+
+  function startNewChat() {
+    setActiveChatId(createChatId());
+    setMessages([]);
+    setCart([]);
+    setCheckedDelivery(null);
+    setChatStarted(false);
+    setInput("");
+    setLoading(false);
+    setSavedChatsOpen(false);
+    setSavedChatsClosing(false);
+    setCartOpen(false);
+    setDeliveryPanelOpen(false);
+    setCheckoutPanelOpen(false);
+    setSelectedProduct(null);
+
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }
+
+  async function openSavedChatsDrawer() {
+    setSavedChatsClosing(false);
+    setSavedChats(loadSavedChats());
+    setSavedChatsOpen(true);
+
+    try {
+      const response = await fetch("/api/saved-chats");
+      const data = (await response.json()) as { chats?: SavedShoppingChat[] };
+
+      if (response.ok && Array.isArray(data.chats)) {
+        const next = data.chats.slice(0, 20);
+        setSavedChats(next);
+        saveShoppingChats(next);
+      }
+    } catch {
+      // Local saved chats remain available when the database is unreachable.
+    }
+  }
+
+  function closeSavedChatsDrawer() {
+    setSavedChatsClosing(true);
+    window.setTimeout(() => {
+      setSavedChatsOpen(false);
+      setSavedChatsClosing(false);
+    }, 260);
+  }
+
   async function sendMessage(message?: string) {
     const userMessage = (message ?? input).trim();
 
@@ -422,10 +695,8 @@ export default function Home() {
       role,
       content,
     }));
-
-    setChatStarted(true);
-    setMessages((prev) => [
-      ...prev,
+    const nextMessages: ChatMessage[] = [
+      ...messages,
       {
         role: "user",
         content: userMessage,
@@ -435,10 +706,30 @@ export default function Home() {
         content: "",
         products: [],
       },
-    ]);
+    ];
+
+    setChatStarted(true);
+    setMessages(nextMessages);
+    setSavedChats(
+      updateSavedChatSnapshot(activeChatId, {
+        title: getSavedChatTitle(nextMessages),
+        messages: nextMessages,
+        cart,
+        checkedDelivery,
+      })
+    );
 
     setInput("");
     setLoading(true);
+
+    let currentMessages = nextMessages;
+
+    const updateStreamingMessages = (
+      updater: (prev: ChatMessage[]) => ChatMessage[]
+    ) => {
+      currentMessages = updater(currentMessages);
+      setMessages(currentMessages);
+    };
 
     try {
       const memory = loadAgentMemory();
@@ -465,7 +756,7 @@ export default function Home() {
 
       async function handleStreamPart(part: ChatStreamPart) {
         if (part.type === "text-delta" && part.delta) {
-          setMessages((prev) => {
+          updateStreamingMessages((prev) => {
             const next = [...prev];
             const lastIndex = next.length - 1;
             const last = next[lastIndex];
@@ -494,7 +785,7 @@ export default function Home() {
             saveAgentRun(data.agentState);
           }
 
-          setMessages((prev) => {
+          updateStreamingMessages((prev) => {
             const next = [...prev];
             const lastIndex = next.length - 1;
             const last = next[lastIndex];
@@ -512,7 +803,7 @@ export default function Home() {
         }
 
         if (part.type === "data-message-part" && part.data?.content) {
-          setMessages((prev) => [
+          updateStreamingMessages((prev) => [
             ...prev,
             {
               role: "assistant",
@@ -553,13 +844,22 @@ export default function Home() {
           await handleStreamPart(JSON.parse(payload) as ChatStreamPart);
         }
       }
+
+      setSavedChats(
+        updateSavedChatSnapshot(activeChatId, {
+          title: getSavedChatTitle(currentMessages),
+          messages: currentMessages,
+          cart,
+          checkedDelivery,
+        })
+      );
     } catch (error) {
       const message =
         error instanceof Error && error.message
           ? error.message
           : "That connection dropped on me. Try once more and I'll get back to the shortlist.";
 
-      setMessages((prev) => {
+      updateStreamingMessages((prev) => {
         const next = [...prev];
         const lastIndex = next.length - 1;
         const last = next[lastIndex];
@@ -577,10 +877,19 @@ export default function Home() {
           ...prev,
           {
             role: "assistant",
-            content: message,
-          },
-        ];
+          content: message,
+        },
+      ];
       });
+
+      setSavedChats(
+        updateSavedChatSnapshot(activeChatId, {
+          title: getSavedChatTitle(currentMessages),
+          messages: currentMessages,
+          cart,
+          checkedDelivery,
+        })
+      );
     } finally {
       sendingRef.current = false;
       setLoading(false);
@@ -668,8 +977,22 @@ export default function Home() {
     >
       <section className="relative flex h-screen min-w-0 flex-col overflow-hidden">
         <header className="border-b border-white/10 px-4 py-4 sm:px-6">
+          <button
+            type="button"
+            onClick={openSavedChatsDrawer}
+            aria-label="Open saved chats"
+            className="absolute left-3 top-6 z-10 flex h-10 w-10 items-center justify-center text-slate-400 transition hover:text-purple-300 sm:left-4"
+          >
+            <Menu size={28} strokeWidth={2.25} />
+            {savedChatsLoaded && savedChats.length > 0 && (
+              <span className="absolute right-0 top-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-purple-500 px-1 text-[10px] font-bold text-white">
+                {savedChats.length}
+              </span>
+            )}
+          </button>
+
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
-            <div className="flex min-w-0 items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3 pl-10 sm:pl-11">
               <div className="shrink-0">
                 <BrandLogo size={64} priority />
               </div>
@@ -917,6 +1240,78 @@ export default function Home() {
         )}
       </section>
 
+      {savedChatsOpen && (
+        <div
+          data-closing={savedChatsClosing}
+          className="saved-chats-backdrop fixed inset-0 z-40 flex justify-start bg-slate-950/70 backdrop-blur-sm"
+        >
+          <button
+            type="button"
+            aria-label="Close saved chats"
+            onClick={closeSavedChatsDrawer}
+            className="absolute inset-0 cursor-default"
+          />
+
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="saved-chats-title"
+            data-closing={savedChatsClosing}
+            className="saved-chats-drawer relative flex h-full w-full max-w-md flex-col border-r border-white/10 bg-slate-950 shadow-2xl"
+          >
+            <div className="flex items-start justify-between border-b border-white/10 p-6">
+              <div>
+                <div
+                  id="saved-chats-title"
+                  className="mb-2 flex items-center gap-2 text-2xl font-bold"
+                >
+                  <History size={18} />
+                  Recent Searches
+                </div>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  Reopen a chat to restore its conversation and cart.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeSavedChatsDrawer}
+                aria-label="Close saved chats"
+                className="panel-close-button rounded-xl p-2 transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-3 overflow-y-auto p-6">
+              <button
+                type="button"
+                onClick={startNewChat}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-purple-400"
+              >
+                Start new shopping chat
+              </button>
+
+              {savedChats.length === 0 ? (
+                <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-5 text-sm leading-6 text-slate-400">
+                  Your saved chats will appear here after you search or add
+                  items to a cart.
+                </div>
+              ) : (
+                savedChats.map((chat) => (
+                  <SavedChatCard
+                    key={chat.id}
+                    chat={chat}
+                    active={chat.id === activeChatId}
+                    onOpen={openSavedChat}
+                  />
+                ))
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+
       {cartOpen && (
         <div className="cart-backdrop fixed inset-0 z-40 flex justify-end bg-slate-950/75 backdrop-blur-sm">
           <button
@@ -998,6 +1393,7 @@ export default function Home() {
         onClose={() => setDeliveryPanelOpen(false)}
         onContinueToCheckout={(result) => {
           setCheckedDelivery(result);
+          persistActiveChatSnapshot(messages, cart, result);
           setDeliveryPanelOpen(false);
           setCheckoutPanelOpen(true);
         }}

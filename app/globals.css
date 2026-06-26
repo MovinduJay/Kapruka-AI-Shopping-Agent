@@ -380,12 +380,72 @@ button:disabled,
   }
 }
 
+@keyframes saved-chats-backdrop-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes saved-chats-backdrop-out {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes saved-chats-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes saved-chats-drawer-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(-100%);
+  }
+}
+
 .cart-backdrop {
   animation: cart-backdrop-in 400ms ease-out both;
 }
 
 .cart-drawer {
   animation: cart-drawer-in 650ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.saved-chats-backdrop {
+  animation: saved-chats-backdrop-in 260ms ease-out both;
+}
+
+.saved-chats-backdrop[data-closing="true"] {
+  animation: saved-chats-backdrop-out 220ms ease-in both;
+}
+
+.saved-chats-drawer {
+  animation: saved-chats-drawer-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.saved-chats-drawer[data-closing="true"] {
+  animation: saved-chats-drawer-out 240ms ease-in both;
 }
 
 .product-detail-backdrop {
@@ -540,6 +600,8 @@ button:disabled,
 @media (prefers-reduced-motion: reduce) {
   .cart-backdrop,
   .cart-drawer,
+  .saved-chats-backdrop,
+  .saved-chats-drawer,
   .product-detail-backdrop,
   .product-detail-modal,
   .search-typing-dots span,
