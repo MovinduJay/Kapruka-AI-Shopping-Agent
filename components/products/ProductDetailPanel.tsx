@@ -200,7 +200,7 @@ function ProductDetailContent({
             type="button"
             onClick={onClose}
             aria-label="Close product details"
-            className="rounded-2xl border border-white/10 bg-white/[0.05] p-2.5 text-slate-400 transition hover:bg-white/10 hover:text-white"
+            className="panel-close-button rounded-2xl border border-white/10 p-2.5 transition"
           >
             <X size={20} />
           </button>

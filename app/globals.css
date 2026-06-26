@@ -209,6 +209,131 @@ button:disabled,
   background-image: linear-gradient(to bottom right, #f1f5f9, #e2e8f0);
 }
 
+.checkout-panel-card {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.035);
+}
+
+.checkout-confirm-card {
+  border-color: rgb(168 85 247 / 0.28);
+  background:
+    linear-gradient(135deg, rgb(88 28 135 / 0.28), rgb(15 23 42 / 0.42)),
+    rgb(15 23 42 / 0.82);
+}
+
+.checkout-confirm-icon {
+  background: #a855f7;
+  color: #ffffff;
+  box-shadow: 0 14px 32px -18px rgb(59 7 100 / 0.85);
+}
+
+.checkout-confirm-eyebrow {
+  color: #d8b4fe;
+}
+
+.checkout-section-card {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.035);
+}
+
+.checkout-section-icon {
+  background: rgb(168 85 247 / 0.14);
+  color: #d8b4fe;
+}
+
+.checkout-mini-card {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(15 23 42 / 0.42);
+}
+
+.checkout-field {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.06);
+  color: #f8fafc;
+}
+
+.checkout-field:focus {
+  border-color: rgb(196 181 253);
+  box-shadow: 0 0 0 4px rgb(168 85 247 / 0.15);
+}
+
+.checkout-checkbox-row {
+  border-color: rgb(255 255 255 / 0.1);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.app-theme[data-theme="light"] .checkout-panel-card {
+  border-color: rgb(121 97 166 / 0.2);
+  background: #ffffff;
+}
+
+.app-theme[data-theme="light"] .checkout-confirm-card {
+  border-color: rgb(121 97 166 / 0.22);
+  background:
+    linear-gradient(135deg, rgb(250 247 255), rgb(255 255 255)),
+    #ffffff;
+}
+
+.app-theme[data-theme="light"] .checkout-confirm-icon {
+  background: #6d4aa2;
+  color: #ffffff;
+  box-shadow: 0 16px 32px -20px rgb(64 41 112 / 0.9);
+}
+
+.app-theme[data-theme="light"] .checkout-confirm-eyebrow {
+  color: #6d4aa2;
+}
+
+.app-theme[data-theme="light"] .checkout-section-card {
+  border-color: rgb(121 97 166 / 0.18);
+  background: #ffffff;
+}
+
+.app-theme[data-theme="light"] .checkout-section-icon {
+  background: rgb(109 74 162 / 0.12);
+  color: #402970;
+}
+
+.app-theme[data-theme="light"] .checkout-mini-card {
+  border-color: rgb(121 97 166 / 0.18);
+  background: #f8fafc;
+}
+
+.app-theme[data-theme="light"] .checkout-field {
+  border-color: rgb(121 97 166 / 0.22);
+  background: #ffffff;
+  color: #172033;
+}
+
+.app-theme[data-theme="light"] .checkout-field:focus {
+  border-color: #7c5db0;
+  box-shadow: 0 0 0 4px rgb(124 93 176 / 0.14);
+}
+
+.app-theme[data-theme="light"] .checkout-checkbox-row {
+  border-color: rgb(121 97 166 / 0.18);
+  background: #ffffff;
+}
+
+.panel-close-button {
+  color: #94a3b8;
+  background: transparent;
+}
+
+.panel-close-button:hover {
+  color: #ffffff;
+  background: rgb(168 85 247 / 0.18);
+}
+
+.app-theme[data-theme="light"] .panel-close-button {
+  color: #64748b;
+}
+
+.app-theme[data-theme="light"] .panel-close-button:hover {
+  color: #402970;
+  background: rgb(109 74 162 / 0.12);
+}
+
 .app-theme[data-theme="light"] .product-card {
   box-shadow: none;
 }

@@ -301,32 +301,47 @@ export async function GET(request: Request) {
         const batch = dates.slice(index, index + 4);
         const batchAvailability = await Promise.all(
           batch.map(async (date, batchIndex) => {
-            const deliveryResult = await callMcpTool(
-              headers,
-              index + batchIndex + 3,
-              "kapruka_check_delivery",
-              {
-                city: canonicalCity.name,
-                delivery_date: date,
-                product_id:
-                  productId && productId.length >= 3 && productId.length <= 80
-                    ? productId
-                    : null,
-                response_format: "json",
-              }
-            );
-            const delivery =
-              parseToolJson<DeliveryCheckResponse>(deliveryResult);
+            try {
+              const deliveryResult = await callMcpTool(
+                headers,
+                index + batchIndex + 3,
+                "kapruka_check_delivery",
+                {
+                  city: canonicalCity.name,
+                  delivery_date: date,
+                  product_id:
+                    productId && productId.length >= 3 && productId.length <= 80
+                      ? productId
+                      : null,
+                  response_format: "json",
+                }
+              );
+              const delivery =
+                parseToolJson<DeliveryCheckResponse>(deliveryResult);
 
-            return {
-              date: delivery.checked_date || date,
-              available: delivery.available === true,
-              fee: typeof delivery.rate === "number" ? delivery.rate : null,
-              currency: delivery.currency || "LKR",
-              reason: delivery.reason || null,
-              earliestDate: delivery.next_available_date || null,
-              warning: delivery.perishable_warning || null,
-            };
+              return {
+                date: delivery.checked_date || date,
+                available: delivery.available === true,
+                fee: typeof delivery.rate === "number" ? delivery.rate : null,
+                currency: delivery.currency || "LKR",
+                reason: delivery.reason || null,
+                earliestDate: delivery.next_available_date || null,
+                warning: delivery.perishable_warning || null,
+              };
+            } catch (dateError) {
+              return {
+                date,
+                available: false,
+                fee: null,
+                currency: "LKR",
+                reason:
+                  dateError instanceof Error
+                    ? dateError.message
+                    : "Could not check this date.",
+                earliestDate: null,
+                warning: null,
+              };
+            }
           })
         );
 

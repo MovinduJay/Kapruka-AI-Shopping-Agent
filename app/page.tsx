@@ -944,7 +944,7 @@ export default function Home() {
                 type="button"
                 onClick={() => setCartOpen(false)}
                 aria-label="Close cart"
-                className="rounded-xl p-2 text-slate-400 transition hover:bg-white/10 hover:text-white"
+                className="panel-close-button rounded-xl p-2 transition"
               >
                 <X size={20} />
               </button>

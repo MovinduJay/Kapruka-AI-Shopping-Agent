@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  LoaderCircle,
   MapPin,
   Truck,
   X,
@@ -26,16 +27,6 @@ export type DeliveryResult = {
 type DeliveryCitySuggestion = {
   name: string;
   aliases?: string[];
-};
-
-type DeliveryAvailabilityDate = {
-  date: string;
-  available: boolean;
-  fee: number | null;
-  currency: string;
-  reason: string | null;
-  earliestDate: string | null;
-  warning: string | null;
 };
 
 type Props = {
@@ -98,18 +89,6 @@ function getCalendarDays(month: Date) {
   });
 }
 
-function getMonthDateRange(month: Date, minimumDate: string) {
-  const year = month.getFullYear();
-  const monthIndex = month.getMonth();
-  const firstDay = toDateValue(new Date(year, monthIndex, 1, 12));
-  const lastDay = toDateValue(new Date(year, monthIndex + 1, 0, 12));
-
-  return {
-    start: firstDay < minimumDate ? minimumDate : firstDay,
-    end: lastDay,
-  };
-}
-
 export function DeliveryPanel({
   open,
   productId,
@@ -130,14 +109,10 @@ export function DeliveryPanel({
   >([]);
   const [cityLookupLoading, setCityLookupLoading] = useState(false);
   const [cityInputFocused, setCityInputFocused] = useState(false);
-  const [dateAvailability, setDateAvailability] = useState<
-    Record<string, DeliveryAvailabilityDate>
-  >({});
-  const [dateAvailabilityLoading, setDateAvailabilityLoading] = useState(false);
+  const [dateCheckLoading, setDateCheckLoading] = useState(false);
   const minimumDate = getSriLankaDate();
   const minimumMonth = parseDateValue(minimumDate);
   const calendarDays = getCalendarDays(calendarMonth);
-  const monthDateRange = getMonthDateRange(calendarMonth, minimumDate);
   const monthLabel = new Intl.DateTimeFormat("en-LK", {
     month: "long",
     year: "numeric",
@@ -147,7 +122,8 @@ export function DeliveryPanel({
     calendarMonth.getMonth() > minimumMonth.getMonth();
   const showCitySuggestions =
     cityInputFocused && (cityLookupLoading || citySuggestions.length > 0);
-  const canLoadDateAvailability = selectedDeliveryCity.trim().length >= 2;
+  const deliveryCity = selectedDeliveryCity.trim() || city.trim();
+  const canCheckDate = deliveryCity.length >= 2;
 
   useEffect(() => {
     const query = city.trim();
@@ -189,79 +165,10 @@ export function DeliveryPanel({
     };
   }, [city]);
 
-  useEffect(() => {
-    const query = selectedDeliveryCity.trim();
-
-    if (query.length < 2) {
-      return;
-    }
-
-    const controller = new AbortController();
-    const timeout = window.setTimeout(async () => {
-      setDateAvailabilityLoading(true);
-
-      try {
-        const params = new URLSearchParams({
-          query,
-          start: monthDateRange.start,
-          end: monthDateRange.end,
-        });
-
-        if (productId) {
-          params.set("productId", productId);
-        }
-
-        const response = await fetch(`/api/delivery?${params.toString()}`, {
-          signal: controller.signal,
-        });
-        const data = (await response.json()) as {
-          dates?: DeliveryAvailabilityDate[];
-          error?: string;
-        };
-
-        if (!controller.signal.aborted) {
-          const nextAvailability = Object.fromEntries(
-            (response.ok ? data.dates || [] : []).map((date) => [
-              date.date,
-              date,
-            ])
-          );
-
-          setDateAvailability(nextAvailability);
-
-          if (data.error) {
-            setError(data.error);
-          } else {
-            setError("");
-          }
-        }
-      } catch {
-        if (!controller.signal.aborted) {
-          setDateAvailability({});
-        }
-      } finally {
-        if (!controller.signal.aborted) {
-          setDateAvailabilityLoading(false);
-        }
-      }
-    }, 250);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timeout);
-    };
-  }, [
-    monthDateRange.end,
-    monthDateRange.start,
-    productId,
-    selectedDeliveryCity,
-  ]);
-
-  function selectDeliveryDate(date: Date) {
+  async function selectDeliveryDate(date: Date) {
     const value = toDateValue(date);
-    const availability = dateAvailability[value];
 
-    if (value < minimumDate || availability?.available !== true) return;
+    if (value < minimumDate || dateCheckLoading) return;
 
     if (date.getMonth() !== calendarMonth.getMonth()) {
       setCalendarMonth(
@@ -270,21 +177,50 @@ export function DeliveryPanel({
     }
 
     setDeliveryDate(value);
-    setResult({
-      city: selectedDeliveryCity.trim(),
-      checkedDate: availability.date,
-      available: availability.available,
-      fee: availability.fee,
-      currency: availability.currency,
-      reason: availability.reason,
-      earliestDate: availability.earliestDate,
-      warning: availability.warning,
-    });
     setError("");
+    setResult(null);
+
+    if (!canCheckDate) {
+      setError("Choose a delivery city before checking a date.");
+      return;
+    }
+
+    setDateCheckLoading(true);
+
+    try {
+      const response = await fetch("/api/delivery", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          city: deliveryCity,
+          deliveryDate: value,
+          productId,
+        }),
+      });
+      const data = (await response.json()) as {
+        result?: DeliveryResult;
+        error?: string;
+      };
+
+      if (!response.ok || !data.result) {
+        throw new Error(data.error || "Could not check delivery.");
+      }
+
+      setResult(data.result);
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not check delivery."
+      );
+    } finally {
+      setDateCheckLoading(false);
+    }
   }
 
   function changeMonth(offset: number) {
-    setDateAvailability({});
     setResult(null);
     setError("");
     setCalendarMonth(
@@ -339,7 +275,7 @@ export function DeliveryPanel({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl p-2 text-slate-400 transition hover:bg-white/10 hover:text-white"
+            className="panel-close-button rounded-xl p-2 transition"
             aria-label="Close delivery panel"
           >
             <X size={20} />
@@ -360,7 +296,6 @@ export function DeliveryPanel({
 
                   setCity(nextCity);
                   setSelectedDeliveryCity("");
-                  setDateAvailability({});
                   if (!nextCity.trim()) {
                     setCitySuggestions([]);
                     setCityLookupLoading(false);
@@ -396,7 +331,6 @@ export function DeliveryPanel({
                             setSelectedDeliveryCity(suggestion.name);
                             setCitySuggestions([]);
                             setCityInputFocused(false);
-                            setDateAvailability({});
                             setDeliveryDate("");
                             setResult(null);
                             setError("");
@@ -416,12 +350,12 @@ export function DeliveryPanel({
               <div className="mb-2 flex items-center justify-between gap-3">
                 <span className="flex items-center gap-2 text-sm font-semibold text-slate-200">
                   <CalendarDays size={16} className="text-purple-300" />
-                  Available delivery dates
+                  Delivery date
                 </span>
 
-                {dateAvailabilityLoading ? (
+                {dateCheckLoading ? (
                   <span className="text-xs font-medium text-slate-400">
-                    Loading availability...
+                    Checking date...
                   </span>
                 ) : deliveryDate ? (
                   <span className="text-xs font-medium text-purple-300">
@@ -476,22 +410,8 @@ export function DeliveryPanel({
                     const isPast = value < minimumDate;
                     const isSelected = value === deliveryDate;
                     const isToday = value === minimumDate;
-                    const availability = dateAvailability[value];
-                    const isAvailable = availability?.available === true;
-                    const isUnavailable =
-                      canLoadDateAvailability &&
-                      isCurrentMonth &&
-                      !isPast &&
-                      availability &&
-                      !availability.available;
-                    const isWaitingForAvailability =
-                      canLoadDateAvailability &&
-                      dateAvailabilityLoading &&
-                      isCurrentMonth &&
-                      !isPast &&
-                      !availability;
                     const canSelectDate =
-                      isCurrentMonth && !isPast && isAvailable;
+                      isCurrentMonth && !isPast && !dateCheckLoading;
 
                     return (
                       <button
@@ -499,32 +419,21 @@ export function DeliveryPanel({
                         type="button"
                         role="gridcell"
                         aria-selected={isSelected}
-                        aria-label={`${formatDate(value)}${
-                          isAvailable
-                            ? ", available"
-                            : isUnavailable
-                              ? ", unavailable"
-                              : ""
-                        }`}
+                        aria-label={formatDate(value)}
                         disabled={!canSelectDate}
                         onClick={() => selectDeliveryDate(date)}
                         className={`relative flex aspect-square items-center justify-center rounded-xl text-sm font-medium transition ${
                           isSelected
-                            ? "bg-purple-200 text-slate-950 shadow-lg shadow-purple-400/30"
+                            ? "bg-purple-100 text-slate-950 shadow-lg shadow-purple-300/30"
                             : isPast || !isCurrentMonth
                               ? "cursor-not-allowed text-slate-600"
-                              : isAvailable
-                                ? "border border-purple-300/70 bg-purple-500/85 text-white shadow-sm shadow-purple-950/20 hover:bg-purple-400"
-                                : isWaitingForAvailability
-                                  ? "cursor-wait bg-white/[0.04] text-slate-300"
-                                  : isUnavailable
-                                    ? "cursor-not-allowed bg-white/[0.025] text-slate-500 line-through"
-                                    : "cursor-not-allowed bg-white/[0.035] text-slate-400"
+                              : "bg-white/[0.055] text-slate-100 hover:bg-purple-300/20 hover:text-white"
                         }`}
                       >
-                        {date.getDate()}
-                        {isAvailable && !isSelected && (
-                          <span className="absolute bottom-1 h-1.5 w-1.5 rounded-full bg-white" />
+                        {isSelected && dateCheckLoading ? (
+                          <LoaderCircle size={14} className="animate-spin" />
+                        ) : (
+                          date.getDate()
                         )}
                         {isToday && !isSelected && (
                           <span className="absolute top-1 h-1 w-1 rounded-full bg-slate-300" />
@@ -536,14 +445,12 @@ export function DeliveryPanel({
 
                 <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
                   <p className="text-xs text-slate-500">
-                    {canLoadDateAvailability
-                      ? "Purple dates are available"
-                      : "Choose a city to load available dates"}
+                    Click any future date to check availability
                   </p>
                   <button
                     type="button"
                     onClick={selectToday}
-                    disabled={dateAvailability[minimumDate]?.available !== true}
+                    disabled={dateCheckLoading}
                     className="rounded-lg px-3 py-1.5 text-xs font-semibold text-purple-300 transition hover:bg-purple-400/10 disabled:cursor-not-allowed disabled:text-slate-600 disabled:hover:bg-transparent"
                   >
                     Today
@@ -552,9 +459,10 @@ export function DeliveryPanel({
               </div>
             </div>
 
-            {!result && canLoadDateAvailability && (
+            {!result && canCheckDate && (
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-slate-400">
-                Select one of the available dates shown in purple.
+                Pick the date you want. If Kapruka cannot deliver on that day,
+                we will show it as not available.
               </div>
             )}
 
