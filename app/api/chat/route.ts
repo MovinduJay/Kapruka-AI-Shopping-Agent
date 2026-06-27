@@ -708,7 +708,7 @@ function cleanSearchQuery(message: string) {
     )
     .replace(/\b(?:rs\.?|lkr)\s*[\d,]+(?:\.\d+)?\s*k?\b/gi, " ")
     .replace(
-      /\b(?:please|pls|just|show me|show|find me|find|get me|give me|give|search for|search|browse for|browse|shop for|shop|looking for|look for|i need|i want|need|want|recommend me|recommend|suggest me|suggest|choose from|to choose|within|best[ -]value|more|may be|maybe)\b/gi,
+      /\b(?:please|pls|just|show me|show|find me|find|get me|give me|give|search for|search|browse for|browse|shop for|shop|looking for|look for|i need|i want|n+e{2,}d|need|want|recommend me|recommend|suggest me|suggest|choose from|to choose|within|best[ -]value|more|may be|maybe)\b/gi,
       " "
     )
     .replace(
@@ -777,6 +777,16 @@ function isSearchConfirmation(message: string) {
   );
 }
 
+function isMoreProductFollowUp(message: string) {
+  const normalized = stripExcludedProductsInstruction(message)
+    .toLowerCase()
+    .trim();
+
+  return /^(?:\?+|more|more please|show\s+(?:me\s+)?(?:\d+\s+)?more|load\s+(?:\d+\s+)?more|another|another 8|others?|other options?|alternatives?|more options?|anything else|more like that|similar|different|cheaper|premium)\b/i.test(
+    normalized
+  );
+}
+
 function recentAssistantSuggestedShopping(history: ChatHistoryMessage[]) {
   return history
     .slice()
@@ -813,6 +823,32 @@ function recentShoppingContext(history: ChatHistoryMessage[]) {
           item.content
         )
     )?.content;
+}
+
+function effectiveProductSearchContext(
+  message: string,
+  history: ChatHistoryMessage[]
+) {
+  const cleanedMessage = stripExcludedProductsInstruction(message) || message;
+  const previousSearch = recentSearchableUserContext(history);
+
+  if (
+    previousSearch &&
+    (isMoreProductFollowUp(cleanedMessage) || isSearchConfirmation(cleanedMessage))
+  ) {
+    return `${previousSearch} ${cleanedMessage}`;
+  }
+
+  return cleanedMessage;
+}
+
+function productRankingContext(message: string, history: ChatHistoryMessage[]) {
+  const effectiveContext = effectiveProductSearchContext(message, history);
+  const excludedNames = excludedProductNamesFromMessage(message);
+
+  if (excludedNames.length === 0) return effectiveContext;
+
+  return `${effectiveContext} Exclude these products: ${excludedNames.join("; ")}`;
 }
 
 function buildSearchQueries(
@@ -916,7 +952,7 @@ function buildSearchQueries(
 }
 
 function categoryForSearchQuery(query: string) {
-  if (/\bflowers?\b/i.test(query) && !/\bcakes?\b/i.test(query)) {
+  if (/\b(?:flowers?|bouquets?|roses?)\b/i.test(query) && !/\bcakes?\b/i.test(query)) {
     return /\bbirthday\b/i.test(query) ? "Birthday Flowers" : "flowers";
   }
 
@@ -927,21 +963,72 @@ function categoryForSearchQuery(query: string) {
   return null;
 }
 
+function stripExcludedProductsInstruction(message: string) {
+  return message
+    .replace(/\s*\bexclude(?: these products?)?:\s*[\s\S]+$/i, "")
+    .trim();
+}
+
+function excludedProductNamesFromMessage(message: string) {
+  const [, excludedText = ""] =
+    message.match(/\bexclude(?: these products?)?:\s*([\s\S]+)$/i) || [];
+
+  if (!excludedText.trim()) return [];
+
+  return excludedText
+    .split(/\s*(?:,|\n|;|\|)\s*/)
+    .map((name) =>
+      name
+        .replace(/^\d+[\).]\s*/, "")
+        .replace(/^["'“”‘’]+|["'“”‘’]+$/g, "")
+        .trim()
+    )
+    .filter((name) => name.length >= 4)
+    .slice(0, 24);
+}
+
+function normalizedComparableName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(?:the|a|an)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function productWasExcluded(product: ProductLike, excludedNames: string[]) {
+  const productName = normalizedComparableName(product.name);
+
+  return excludedNames.some((name) => {
+    const excludedName = normalizedComparableName(name);
+
+    if (!excludedName) return false;
+    if (productName === excludedName) return true;
+
+    return (
+      Math.min(productName.length, excludedName.length) >= 18 &&
+      (productName.includes(excludedName) || excludedName.includes(productName))
+    );
+  });
+}
+
 async function searchKaprukaProductsDirect(
   message: string,
   memory: AgentMemory,
   history: ChatHistoryMessage[] = []
 ) {
+  const searchMessage = effectiveProductSearchContext(message, history);
   const headers = await startDirectMcpSession();
-  const searchConfirmation = isSearchConfirmation(message);
+  const searchConfirmation = isSearchConfirmation(searchMessage);
   const followUpContext = searchConfirmation
     ? recentSearchableUserContext(history)
     : null;
   const budget = extractBudget(
-    followUpContext ? `${followUpContext} ${message}` : message,
+    followUpContext ? `${followUpContext} ${searchMessage}` : searchMessage,
     memory
   );
-  const queries = buildSearchQueries(message, memory, history);
+  const queries = buildSearchQueries(searchMessage, memory, history);
   const diversifyGiftSearch =
     queries.some((query) => /\bgifts?\b/i.test(query)) &&
     queries.some((query) => /\bflowers?\b/i.test(query)) &&
@@ -957,6 +1044,7 @@ async function searchKaprukaProductsDirect(
   const diversifySearch = diversifyGiftSearch || diversifyBroadSearch;
   const attempts: Array<{ q: string; category: string | null }> = [];
   const products: ProductLike[] = [];
+  const excludedNames = excludedProductNamesFromMessage(message);
 
   for (const [index, query] of queries.entries()) {
     const preferredCategory = categoryForSearchQuery(query);
@@ -995,6 +1083,7 @@ async function searchKaprukaProductsDirect(
               productFromObject(productObject, products.length + productIndex)
             )
             .filter((product): product is ProductLike => Boolean(product))
+            .filter((product) => !productWasExcluded(product, excludedNames))
             .filter((product) => productMatchesStrictRequest(product, query))
         : [];
 
@@ -2085,12 +2174,19 @@ function clearlyAsksForProductSearch(
       normalized
     );
   const concreteNeed =
-    /\b(?:i\s+)?(?:need|want|get me|give me)\b/i.test(normalized) &&
+    /\b(?:i\s+)?(?:n+e{2,}d|need|want|get me|give me)\b/i.test(normalized) &&
     hasConcreteShoppingSubject(normalized);
   const genericNeed =
-    /\b(?:i\s+)?(?:need|want|looking for|look for|after|get me|give me)\b/i.test(
+    /\b(?:i\s+)?(?:n+e{2,}d|need|want|looking for|look for|after|get me|give me)\b/i.test(
       normalized
     ) && hasSearchableProductPhrase(normalized);
+  const previousProductRequest = recentSearchableUserContext(history);
+  const moreFromPreviousProductRequest =
+    isMoreProductFollowUp(normalized) && Boolean(previousProductRequest);
+  const moreWithConcreteProduct =
+    /\b(?:more|another|others?|other options?|alternatives?|similar|different|cheaper|premium)\b/i.test(
+      normalized
+    ) && hasConcreteShoppingSubject(normalized);
   const concreteCategoryWithBudget =
     hasConcreteShoppingSubject(normalized) &&
     extractBudget(normalized, {}) !== null;
@@ -2114,6 +2210,8 @@ function clearlyAsksForProductSearch(
     budgetedShoppingRequest ||
     shortConcreteFollowUp ||
     confirmsSuggestedSearch ||
+    moreFromPreviousProductRequest ||
+    moreWithConcreteProduct ||
     hasShoppingFollowUpContext(normalized, history)
   );
 }
@@ -2413,7 +2511,7 @@ function productTextForRanking(product: ProductLike) {
 }
 
 function strictRequestAliases(message: string) {
-  const normalized = message.toLowerCase();
+  const normalized = stripExcludedProductsInstruction(message).toLowerCase();
   const aliasGroups: string[][] = [];
 
   if (/\b(?:watch|watches|wristwatch|smartwatch)\b/i.test(normalized)) {
@@ -2496,26 +2594,27 @@ function strictRequestAliases(message: string) {
 }
 
 function productMatchesStrictRequest(product: ProductLike, message: string) {
-  const aliases = strictRequestAliases(message);
+  const request = stripExcludedProductsInstruction(message) || message;
+  const aliases = strictRequestAliases(request);
 
   if (aliases.length === 0) return true;
 
   const productText = productTextForRanking(product).toLowerCase();
   const productName = product.name.toLowerCase();
   const asksForWatch = /\b(?:watch|watches|wristwatch|smartwatch)\b/i.test(
-    message
+    request
   );
   const asksForWatchAccessory =
     /\b(?:box|case|strap|band|charger|protector|stand|holder|storage|display)\b/i.test(
-      message
+      request
     );
-  const asksForEarbuds = /\b(?:earbuds?|earphones?|airpods?)\b/i.test(message);
-  const asksForHeadphones = /\b(?:headphones?|headsets?)\b/i.test(message);
-  const asksForFlowers = /\b(?:flowers?|bouquets?|roses?)\b/i.test(message);
-  const asksForCake = /\b(?:cakes?|cupcakes?)\b/i.test(message);
+  const asksForEarbuds = /\b(?:earbuds?|earphones?|airpods?)\b/i.test(request);
+  const asksForHeadphones = /\b(?:headphones?|headsets?)\b/i.test(request);
+  const asksForFlowers = /\b(?:flowers?|bouquets?|roses?)\b/i.test(request);
+  const asksForCake = /\b(?:cakes?|cupcakes?)\b/i.test(request);
   const asksForSnack =
     /\b(?:snacks?|cookies?|biscuits?|chips?|nuts?|chocolates?|sweets?|candy)\b/i.test(
-      message
+      request
     );
   const asksForAudioAccessory =
     /\b(?:holder|stand|case|cover|bag|cable|adapter|earpads?|cushions?|replacement|parts?)\b/i.test(
@@ -2564,10 +2663,13 @@ function productMatchesStrictRequest(product: ProductLike, message: string) {
     asksForFlowers &&
     !asksForCake &&
     (!/\b(?:bouquets?|boquets?|roses?|blooms?|flower\s+(?:arrangements?|bunch(?:es)?|baskets?|bouquets?)|floral\s+arrangements?)\b/i.test(
-      productName
+      `${product.name} ${product.description || ""}`
     ) ||
-      /\b(?:clips?|jewellery|jewelry|earrings?|necklace|dress|shirt|print|decor|decoration|artificial)\b/i.test(
-        productName
+      !/\b(?:flowers?|floral|bouquets?|boquets?|roses?|blooms?)\b/i.test(
+        `${product.category || ""} ${product.description || ""} ${product.name}`
+      ) ||
+      /\b(?:book|novel|story|author|clips?|jewellery|jewelry|earrings?|necklace|dress|shirt|print|decor|decoration|artificial)\b/i.test(
+        `${product.name} ${product.category || ""}`
       ))
   ) {
     return false;
@@ -2591,9 +2693,10 @@ function productMatchesStrictRequest(product: ProductLike, message: string) {
 }
 
 function sharedRequestTokens(product: ProductLike, message: string) {
+  const request = stripExcludedProductsInstruction(message) || message;
   const requestTokens = new Set([
-    ...tokenizeForRanking(message),
-    ...strictRequestAliases(message),
+    ...tokenizeForRanking(request),
+    ...strictRequestAliases(request),
   ]);
   const productTokens = new Set(tokenizeForRanking(productTextForRanking(product)));
 
@@ -2607,8 +2710,9 @@ function scoreProductForAgent(
 ): ProductRankingSignal {
   const reasons: string[] = [];
   const normalized = productTextForRanking(product).toLowerCase();
-  const budget = extractBudget(message, memory);
-  const sharedTokens = sharedRequestTokens(product, message);
+  const request = stripExcludedProductsInstruction(message) || message;
+  const budget = extractBudget(request, memory);
+  const sharedTokens = sharedRequestTokens(product, request);
   let score = 50;
 
   if (sharedTokens.length > 0) {
@@ -2655,12 +2759,11 @@ function scoreProductForAgent(
   }
 
   if (typeof product.rating === "number" && product.rating > 0) {
-    score += Math.min(12, product.rating * 2);
-    reasons.push("rated");
+    score += Math.min(5, product.rating);
   }
 
   if (typeof product.reviewCount === "number" && product.reviewCount > 0) {
-    score += Math.min(8, Math.log10(product.reviewCount + 1) * 4);
+    score += Math.min(5, Math.log10(product.reviewCount + 1) * 3);
     reasons.push("review signal");
   }
 
@@ -2680,7 +2783,7 @@ function scoreProductForAgent(
     }
   }
 
-  if (/\b(?:gift|birthday|anniversary|mother|father|wife|husband|friend)\b/i.test(message)) {
+  if (/\b(?:gift|birthday|anniversary|mother|father|wife|husband|friend)\b/i.test(request)) {
     if (/\b(?:flower|cake|chocolate|hamper|gift|card)\b/i.test(normalized)) {
       score += 10;
       reasons.push("gift-friendly");
@@ -2706,6 +2809,7 @@ function rankProductsForAgent(
   message: string,
   memory: AgentMemory
 ) {
+  const excludedNames = excludedProductNamesFromMessage(message);
   const uniqueProducts = [
     ...new Map(
       products.map((product) => [
@@ -2714,9 +2818,9 @@ function rankProductsForAgent(
       ])
     ).values(),
   ];
-  const relevantProducts = uniqueProducts.filter((product) =>
-    productMatchesStrictRequest(product, message)
-  );
+  const relevantProducts = uniqueProducts
+    .filter((product) => !productWasExcluded(product, excludedNames))
+    .filter((product) => productMatchesStrictRequest(product, message));
   const pricedProducts = relevantProducts
     .filter(
       (product): product is ProductLike & { price: number } =>
@@ -2863,7 +2967,7 @@ function buildSystemPrompt(
   plan: ReturnType<typeof buildAgentPlan>
 ) {
   return `
-You are Kapruka AI Concierge, a Sri Lankan AI marketplace shopping assistant.
+You are Kapruka Shopping Buddy, a Sri Lankan AI marketplace shopping assistant.
 
 You help users shop across Kapruka's broad marketplace using real Kapruka MCP tools. Kapruka carries electronics, groceries, fashion, home products, daily essentials, gifts, and products from thousands of third-party sellers.
 
@@ -2875,7 +2979,7 @@ Core customer model:
 - When seller, brand, size, compatibility, quantity, specifications, or delivery details affect the decision, surface those factors or ask one focused question.
 
 Personality and voice:
-- You are Kapruka Scout: a sharp, modern Sri Lankan shopping companion, not a customer-support script or a product catalogue.
+- You are Kapruka Shopping Buddy: a sharp, modern Sri Lankan shopping companion, not a customer-support script or a product catalogue.
 - Feel like a familiar, trustworthy best friend who happens to be excellent at shopping. Be present in the conversation before trying to sell anything.
 - Sound warm, relaxed, confident, and observant. React to what the user actually said instead of jumping straight into a search.
 - Use current, natural language such as "solid pick", "worth it", "skip this one", or "my pick" when it fits. Never force slang.
@@ -2885,7 +2989,7 @@ Personality and voice:
 - Use short, conversational sentences and contractions. Vary sentence length naturally; do not make every reply follow the same template.
 - Notice and reuse details from the recent conversation: budget, recipient, occasion, city, date, style, brand, size, and dislikes. Do not ask for information the user already gave.
 - If the user shares a personal problem, respond like a perceptive close friend: acknowledge it in a few words, then offer one concrete next move. Do not turn it into a therapy lecture.
-- Use your own judgment about the situation. A small thoughtful gesture for someone, a comfort purchase for the user, or simply taking a breather can all be useful directions. Mention one only when it genuinely fits; keep it optional and never force a sale.
+- Use your own judgment about the situation. For emotional small talk, give practical friend-level judgment first. Do not suggest products, gifts, comfort purchases, flowers, snacks, or browsing unless the user asks to buy, send, order, browse, find, or fix it with a gift.
 - Do not search during pure greetings or emotional small talk. Once the user asks to see/find/buy/browse, accepts a browse/search suggestion, gives a budget for a thing, or names a purchasable product/category, use live Kapruka product search and show product cards. In user-facing wording, keep tool/search mechanics invisible; say "I'll find something for you" or "I'll find a few good ones" instead.
 - For emotional small talk, avoid polished therapy-speak. Good: "Oof, give it a minute before texting. Then keep it simpleâ€”no essay." Bad: "I'm sorry to hear you're experiencing difficulties."
 - When using memory, do it like a friend noticing context, not like a database report. Good: "Since you were keeping it around Rs. 10,000..." Bad: "Based on your stored preference..."
@@ -3047,7 +3151,7 @@ function buildConversationSystemPrompt(
   plan: ReturnType<typeof buildAgentPlan>
 ) {
   return `
-You are Kapruka Scout, Kapruka's AI shopping agent for Sri Lanka. You are not a general-purpose assistant.
+You are Kapruka Shopping Buddy, Kapruka's AI shopping agent for Sri Lanka. You are not a general-purpose assistant.
 
 Reply to the latest user message, not with a generic speech.
 - HARD LIMIT: default to 35 words or fewer and at most 2 short sentences. Count before answering and rewrite if longer. Never give an essay unless explicitly requested.
@@ -3062,7 +3166,7 @@ Reply to the latest user message, not with a generic speech.
 - Greetings, thanks, and casual questions should receive casual answers only. Never turn them into a product pitch.
 - Never ask about delivery before the user selects a product or explicitly asks about delivery, shipping, or arrival.
 - Do not pressure, convince, or proactively move the user toward cart or checkout. Help with the current decision only.
-- You have shopping instinct, not sales pressure. When the user's situation could genuinely benefit from a small gesture, flowers, comfort food, or a self-treat, casually suggest one direction as an option. Do not search or invent a product until they ask to see options.
+- You have shopping instinct, not sales pressure. When the user shares a personal/emotional situation, respond like a sharp close friend first. Do not suggest products, gifts, flowers, comfort food, or a self-treat unless the user asks to buy, send, order, browse, find, or fix it with a gift.
 - For tension with someone close, prefer a calm, low-pressure repair over a grand gesture. A small peace offering can support an honest message, but should never replace it.
 - If repairing things is not the right move yet, it is fine to suggest cooling off or getting the user something comforting instead.
 - Make the judgment yourself from the conversation. Do not mechanically mention gifts in every emotional reply.
@@ -3379,7 +3483,7 @@ function fallbackGeminiReply(
   plan: ReturnType<typeof buildAgentPlan>
 ) {
   if (isEmotionalSmallTalk(message)) {
-    return "That sounds rough. If a small gesture would help, I can find something thoughtful on Kapruka without overdoing it.";
+    return "Oof, that sounds rough. Give it a minute, then keep the next move simple and calm.";
   }
 
   if (isVagueGiftIdeaRequest(message)) {
@@ -3661,10 +3765,10 @@ export async function POST(req: Request) {
         console.warn("Kapruka direct product search failed:", error);
       }
 
-      const searchContextForRanking =
-        isSearchConfirmation(message) && recentSearchableUserContext(history)
-          ? `${recentSearchableUserContext(history)} ${message}`
-          : message;
+      const searchContextForRanking = productRankingContext(
+        message,
+        history
+      );
       const searchBudget = extractBudget(searchContextForRanking, memory);
       const enrichedProducts = await enrichProductsWithMetadata(productsFromMcp);
       const ranked = rankProductsForAgent(
@@ -3902,14 +4006,26 @@ export async function POST(req: Request) {
 
     const mergedProducts = mergeProducts(productsFromMcp, productsFromText);
     const shouldShowCards = wantsProductCards(message, history, data);
+    const searchContextForRanking = productRankingContext(
+      message,
+      history
+    );
     const products = shouldShowCards
       ? await enrichProductsWithMetadata(mergedProducts).then((items) => {
-          const ranked = rankProductsForAgent(items, message, memory);
+          const ranked = rankProductsForAgent(
+            items,
+            searchContextForRanking,
+            memory
+          );
 
           return ranked.products.slice(0, PRODUCT_CARD_LIMIT);
         })
       : [];
-    const ranking = rankProductsForAgent(products, message, memory).ranking;
+    const ranking = rankProductsForAgent(
+      products,
+      searchContextForRanking,
+      memory
+    ).ranking;
     const tools = buildToolTimeline(data, startedAt);
     const agentState = buildAgentState({
       traceId,

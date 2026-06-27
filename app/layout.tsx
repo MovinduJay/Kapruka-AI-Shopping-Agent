@@ -14,9 +14,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Kapruka AI Concierge",
+  title: "Kapruka Shopping Buddy",
   description:
     "Shop electronics, groceries, fashion, home essentials, gifts, and more across Kapruka.",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

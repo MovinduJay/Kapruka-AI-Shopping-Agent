@@ -10,7 +10,7 @@ export function BrandLogo({ size = 40, className = "", priority = false }: Props
   return (
     <Image
       src="/logo.png"
-      alt="Kapruka AI Concierge logo"
+      alt="Kapruka Shopping Buddy logo"
       width={size}
       height={size}
       priority={priority}

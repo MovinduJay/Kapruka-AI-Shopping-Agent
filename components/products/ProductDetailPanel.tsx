@@ -187,10 +187,10 @@ function ProductDetailContent({
               <BrandLogo size={56} />
             </span>
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-300">
-                Product details
+              <p className="text-lg font-bold leading-6 text-white sm:text-xl">
+                Product Details
               </p>
-              <p className="truncate text-sm text-slate-400">
+              <p className="truncate text-sm leading-5 text-slate-400 sm:text-base">
                 Everything worth knowing before you choose
               </p>
             </div>

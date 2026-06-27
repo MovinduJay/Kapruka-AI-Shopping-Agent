@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  Check,
   Clock,
   Copy,
   History,
@@ -531,6 +532,7 @@ export default function Home() {
     useState<SharedLocation | null>(null);
   const [locationPromptDismissed, setLocationPromptDismissed] = useState(false);
   const [composerGlass, setComposerGlass] = useState(false);
+  const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
   const theme = useSyncExternalStore(
     subscribeToTheme,
     getThemeSnapshot,
@@ -709,8 +711,13 @@ export default function Home() {
     setComposerGlass(distanceFromBottom > 120);
   }
 
-  async function copyMessage(content: string) {
+  async function copyMessage(content: string, key: string) {
     await navigator.clipboard.writeText(content);
+    setCopiedMessageKey(key);
+
+    window.setTimeout(() => {
+      setCopiedMessageKey((current) => (current === key ? null : current));
+    }, 1400);
   }
 
   function editUserMessage(content: string) {
@@ -738,6 +745,24 @@ export default function Home() {
     setDeliveryPanelOpen(false);
     setCheckoutPanelOpen(false);
     setSelectedProduct(null);
+  }
+
+  function restoreSavedCart(chat: SavedShoppingChat) {
+    setActiveChatId(chat.id);
+    setMessages(chat.messages || []);
+    setCart(chat.cart || []);
+    setCheckedDelivery(chat.checkedDelivery || null);
+    setCheckoutState(normalizeCheckoutState(chat.checkoutState));
+    setShoppingFlowStep("cart");
+    setChatStarted((chat.messages || []).length > 0);
+    setInput("");
+    setLoading(false);
+    setSavedChatsOpen(false);
+    setSavedChatsClosing(false);
+    setDeliveryPanelOpen(false);
+    setCheckoutPanelOpen(false);
+    setSelectedProduct(null);
+    setCartOpen(true);
   }
 
   function startNewChat() {
@@ -1050,6 +1075,9 @@ export default function Home() {
     0
   );
   const cartQuantity = cart.reduce((total, item) => total + item.quantity, 0);
+  const savedCartChats = savedChats
+    .filter((chat) => chat.cart.length > 0 && chat.id !== activeChatId)
+    .slice(0, 3);
   const isWelcome = !chatStarted && !loading;
   const latestUserMessage =
     [...messages].reverse().find((message) => message.role === "user")
@@ -1063,6 +1091,30 @@ export default function Home() {
     }
 
     return latestUserMessage;
+  }
+
+  function productSearchContextBefore(messageIndex: number) {
+    for (let index = messageIndex - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+
+      if (message.role !== "user") continue;
+
+      const content = message.content
+        .replace(/\s*\bexclude(?: these products?)?:\s*[\s\S]+$/i, "")
+        .trim();
+
+      if (
+        /^(?:\?+|more|more please|show\s+(?:me\s+)?(?:\d+\s+)?more|load\s+(?:\d+\s+)?more|another|another 8|others?|other options?|alternatives?|more options?|anything else|more like that|similar|different|cheaper|premium)\b/i.test(
+          content
+        )
+      ) {
+        continue;
+      }
+
+      return content;
+    }
+
+    return userMessageBefore(messageIndex);
   }
 
   function assistantGroupContent(messageIndex: number) {
@@ -1119,6 +1171,18 @@ export default function Home() {
     return products;
   }
 
+  function displayedProductNamesUntil(messageIndex: number) {
+    return [
+      ...new Set(
+        messages
+          .slice(0, messageIndex + 1)
+          .flatMap((message) => message.products || [])
+          .map((product) => product.name)
+          .filter(Boolean)
+      ),
+    ];
+  }
+
   return (
     <main
       data-theme={theme}
@@ -1154,7 +1218,7 @@ export default function Home() {
 
                   <div className="min-w-0">
                     <h1 className="text-xl font-bold sm:text-2xl">
-                      Kapruka AI Concierge
+                      Kapruka Shopping Buddy
                     </h1>
                     <p className="hidden text-sm text-slate-400 sm:block">
                       Electronics, groceries, fashion, home, gifts, and more
@@ -1230,6 +1294,8 @@ export default function Home() {
                 message.content.trim().length > 0;
               const hasVisibleProducts =
                 message.products?.length || groupProducts.length;
+              const copyKey = `${message.role}-${index}`;
+              const isCopied = copiedMessageKey === copyKey;
 
               if (
                 message.role === "assistant" &&
@@ -1288,13 +1354,18 @@ export default function Home() {
                           copyMessage(
                             message.role === "assistant"
                               ? assistantGroupContent(index)
-                              : message.content
+                              : message.content,
+                            copyKey
                           )
                         }
-                        aria-label="Copy message"
-                        className="rounded-lg p-1.5 text-slate-500 transition hover:bg-white/10 hover:text-slate-200"
+                        aria-label={isCopied ? "Copied" : "Copy message"}
+                        className={`rounded-lg p-1.5 transition hover:bg-white/10 ${
+                          isCopied
+                            ? "text-emerald-400"
+                            : "text-slate-500 hover:text-slate-200"
+                        }`}
                       >
-                        <Copy size={18} />
+                        {isCopied ? <Check size={18} /> : <Copy size={18} />}
                       </button>
 
                       {message.role === "user" && (
@@ -1319,7 +1390,8 @@ export default function Home() {
                         onAddToCart={addToCart}
                         onViewDetails={viewProductDetails}
                         onFollowUp={sendMessage}
-                        searchContext={userMessageBefore(index)}
+                        searchContext={productSearchContextBefore(index)}
+                        excludedProductNames={displayedProductNamesUntil(index)}
                         disabled={loading}
                       />
                     )}
@@ -1507,9 +1579,57 @@ export default function Home() {
 
             <div className="flex-1 space-y-3 overflow-y-auto p-6">
               {cart.length === 0 ? (
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-sm text-slate-400">
-                  Cart items will appear here after you add a product.
-                </div>
+                <>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-sm text-slate-400">
+                    Cart items will appear here after you add a product.
+                  </div>
+
+                  {savedCartChats.length > 0 && (
+                    <section className="rounded-3xl border border-purple-400/20 bg-purple-500/10 p-4">
+                      <div className="mb-3 flex items-center gap-2">
+                        <History size={17} className="text-purple-300" />
+                        <h3 className="text-sm font-bold text-white">
+                          Buy again
+                        </h3>
+                      </div>
+
+                      <div className="space-y-2">
+                        {savedCartChats.map((chat) => {
+                          const quantity = chat.cart.reduce(
+                            (total, item) => total + item.quantity,
+                            0
+                          );
+                          const total = chat.cart.reduce(
+                            (sum, item) => sum + (item.price || 0) * item.quantity,
+                            0
+                          );
+
+                          return (
+                            <button
+                              key={chat.id}
+                              type="button"
+                              onClick={() => restoreSavedCart(chat)}
+                              className="flex w-full items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-3 text-left transition hover:border-purple-300/60 hover:bg-white/[0.08]"
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-white">
+                                  {chat.title}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-400">
+                                  {quantity} item{quantity === 1 ? "" : "s"} in
+                                  cart
+                                </p>
+                              </div>
+                              <span className="shrink-0 text-sm font-bold text-purple-300">
+                                Rs. {total.toLocaleString()}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  )}
+                </>
               ) : (
                 cart.map((item) => (
                   <CartItemRow

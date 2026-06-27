@@ -59,6 +59,29 @@ const suggestions = [
   },
 ];
 
+const quickIntents = [
+  {
+    label: "Buy again",
+    prompt: "I want to reorder something from a previous cart",
+  },
+  {
+    label: "Track order",
+    prompt: "Track my Kapruka order",
+  },
+  {
+    label: "Birthday gift",
+    prompt: "Help me choose a birthday gift",
+  },
+  {
+    label: "Same-day delivery",
+    prompt: "Show me things I can send quickly",
+  },
+  {
+    label: "Under Rs. 10,000",
+    prompt: "Show me good options under Rs. 10,000",
+  },
+];
+
 type WelcomeProduct = {
   key: string;
   name: string;
@@ -145,7 +168,7 @@ export function WelcomeScreen({
           Shop across Kapruka.
         </h2>
         <p className="mx-auto mt-3 max-w-2xl text-xl tracking-[-0.02em] text-slate-300 sm:text-3xl">
-          What do you need today?
+          Hi, what do you need today?
         </p>
 
         <div className="shopping-composer mx-auto mt-8 flex w-full max-w-3xl gap-2 rounded-full border p-2">
@@ -170,7 +193,20 @@ export function WelcomeScreen({
           </button>
         </div>
 
-        <div className="mx-auto mt-6 flex max-w-6xl items-center gap-3 pb-8 sm:gap-4 sm:pb-10">
+        <div className="mx-auto mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
+          {quickIntents.map((intent) => (
+            <button
+              key={intent.label}
+              type="button"
+              onClick={() => onSubmit(intent.prompt)}
+              className="rounded-full border border-white/10 bg-white/[0.055] px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-purple-300/60 hover:bg-purple-500/10 hover:text-purple-200"
+            >
+              {intent.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mx-auto mt-7 flex max-w-6xl items-center gap-3 pb-10 sm:gap-4 sm:pb-14">
           <button
             type="button"
             onClick={() => scrollCategories("left")}

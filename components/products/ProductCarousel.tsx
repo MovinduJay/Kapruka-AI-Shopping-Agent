@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowRight, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { ProductCard } from "@/components/products/ProductCard";
 import type { ProductCard as ProductCardType } from "@/types/product";
 
@@ -12,6 +12,7 @@ type Props = {
   onViewDetails: (product: ProductCardType) => void;
   onFollowUp: (message: string) => void;
   searchContext: string;
+  excludedProductNames?: string[];
   disabled?: boolean;
 };
 
@@ -41,6 +42,7 @@ export function ProductCarousel({
   onViewDetails,
   onFollowUp,
   searchContext,
+  excludedProductNames = [],
   disabled = false,
 }: Props) {
   const carouselRef = useRef<HTMLDivElement>(null);
@@ -71,6 +73,10 @@ export function ProductCarousel({
       message: `Show me the best-value options for ${searchSubject}`,
     },
   ];
+  const moreMessage = `Show me 8 more ${searchSubject}. Exclude these products: ${[
+    ...new Set([...excludedProductNames, ...products.map((product) => product.name)]),
+  ]
+    .join("; ")}`;
 
   function scroll(direction: "left" | "right") {
     const carousel = carouselRef.current;
@@ -128,6 +134,23 @@ export function ProductCarousel({
             />
           </div>
         ))}
+
+        {products.length >= 8 && (
+          <button
+            type="button"
+            onClick={() => onFollowUp(moreMessage)}
+            disabled={disabled}
+            className="flex min-h-[360px] w-[82%] shrink-0 snap-start flex-col items-center justify-center rounded-[30px] border border-dashed border-purple-400/45 bg-purple-500/[0.07] p-6 text-center text-purple-200 transition hover:border-purple-300 hover:bg-purple-500/15 disabled:cursor-not-allowed disabled:opacity-45 sm:w-[calc((100%_-_1rem)/2)] lg:w-[calc((100%_-_2rem)/3)] xl:w-[calc((100%_-_3rem)/4)]"
+          >
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-purple-500 text-white shadow-lg shadow-purple-950/25">
+              <Plus size={24} strokeWidth={2.5} />
+            </span>
+            <span className="mt-4 text-lg font-black">More options</span>
+            <span className="mt-2 text-sm leading-6 text-slate-400">
+              Load 8 new products that were not shown here.
+            </span>
+          </button>
+        )}
       </div>
 
       <div
