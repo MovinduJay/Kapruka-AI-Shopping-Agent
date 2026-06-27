@@ -90,6 +90,8 @@ model SavedShoppingChat {
   messagesJson        Json
   cartJson            Json
   checkedDeliveryJson Json?
+  checkoutStateJson   Json?
+  shoppingFlowStep    String      @default("cart")
   createdAt           DateTime    @default(now())
   updatedAt           DateTime    @updatedAt
   session             UserSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)

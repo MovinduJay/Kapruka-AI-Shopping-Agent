@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import {
+  CalendarDays,
   CheckCircle2,
   CreditCard,
   ExternalLink,
@@ -22,7 +23,7 @@ import {
 import type { DeliveryResult } from "@/components/delivery/DeliveryPanel";
 import type { CartItem } from "@/types/product";
 
-type CheckoutForm = {
+export type CheckoutForm = {
   recipientName: string;
   recipientPhone: string;
   address: string;
@@ -33,7 +34,7 @@ type CheckoutForm = {
   giftMessage: string;
 };
 
-type CheckoutResult = {
+export type CheckoutResult = {
   checkout_url: string;
   order_ref: string;
   summary: {
@@ -46,14 +47,27 @@ type CheckoutResult = {
   expires_at: string;
 };
 
+export type CheckoutStep = "form" | "review" | "pay";
+
+export type CheckoutState = {
+  form: CheckoutForm;
+  step: CheckoutStep;
+  result: CheckoutResult | null;
+};
+
+export type CheckoutProgressTarget = "cart" | "delivery" | "date" | "checkout";
+
 type Props = {
   open: boolean;
   cart: CartItem[];
   delivery: DeliveryResult | null;
+  checkoutState: CheckoutState;
+  onCheckoutStateChange: (state: CheckoutState) => void;
+  onProgressStepClick: (target: CheckoutProgressTarget) => void;
   onClose: () => void;
 };
 
-const initialForm: CheckoutForm = {
+export const initialCheckoutForm: CheckoutForm = {
   recipientName: "",
   recipientPhone: "",
   address: "",
@@ -64,6 +78,20 @@ const initialForm: CheckoutForm = {
   giftMessage: "",
 };
 
+export const initialCheckoutState: CheckoutState = {
+  form: initialCheckoutForm,
+  step: "form",
+  result: null,
+};
+
+export function createInitialCheckoutState(): CheckoutState {
+  return {
+    form: { ...initialCheckoutForm },
+    step: "form",
+    result: null,
+  };
+}
+
 const checkoutFieldClass =
   "checkout-field w-full rounded-2xl border px-4 py-3 text-sm outline-none transition";
 
@@ -71,10 +99,15 @@ const checkoutLabelClass =
   "mb-2 flex items-center gap-2 text-sm font-semibold text-slate-200";
 
 const checkoutSteps = [
-  { label: "Cart", icon: ShoppingCart },
-  { label: "Delivery checked", icon: Truck },
-  { label: "Checkout", icon: CreditCard },
-];
+  { label: "Cart", icon: ShoppingCart, target: "cart" },
+  { label: "Date selection", icon: CalendarDays, target: "date" },
+  { label: "Delivery destination", icon: Truck, target: "delivery" },
+  { label: "Checkout", icon: CreditCard, target: "checkout" },
+] satisfies Array<{
+  label: string;
+  icon: typeof ShoppingCart;
+  target: CheckoutProgressTarget;
+}>;
 
 function getProductImageUrl(product: CartItem) {
   if (!product.imageUrl && !product.productUrl) return null;
@@ -165,12 +198,18 @@ function CheckoutReviewItem({ item }: { item: CartItem }) {
   );
 }
 
-export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
-  const [form, setForm] = useState<CheckoutForm>(initialForm);
-  const [step, setStep] = useState<"form" | "review" | "pay">("form");
-  const [result, setResult] = useState<CheckoutResult | null>(null);
+export function CheckoutPanel({
+  open,
+  cart,
+  delivery,
+  checkoutState,
+  onCheckoutStateChange,
+  onProgressStepClick,
+  onClose,
+}: Props) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const { form, step, result } = checkoutState;
   const cartTotal = cart.reduce(
     (total, item) => total + (item.price || 0) * item.quantity,
     0
@@ -183,11 +222,28 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
     form.address.trim() &&
     form.senderName.trim();
 
+  function updateCheckoutState(nextState: CheckoutState) {
+    onCheckoutStateChange(nextState);
+  }
+
+  function setCheckoutStep(nextStep: CheckoutStep) {
+    updateCheckoutState({
+      ...checkoutState,
+      step: nextStep,
+    });
+  }
+
   function updateField<K extends keyof CheckoutForm>(
     key: K,
     value: CheckoutForm[K]
   ) {
-    setForm((current) => ({ ...current, [key]: value }));
+    updateCheckoutState({
+      ...checkoutState,
+      form: {
+        ...form,
+        [key]: value,
+      },
+    });
     setError("");
   }
 
@@ -237,8 +293,11 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
         throw new Error(data.error || "Could not create checkout link.");
       }
 
-      setResult(data.result);
-      setStep("pay");
+      updateCheckoutState({
+        ...checkoutState,
+        step: "pay",
+        result: data.result,
+      });
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -298,25 +357,24 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
             className="checkout-panel-card mb-6 rounded-3xl border px-5 py-5"
             aria-label="Checkout progress"
           >
-            <div className="relative grid grid-cols-3 items-center">
-              <div className="absolute left-[18%] right-[18%] top-1/2 h-0.5 -translate-y-1/2 bg-slate-700" />
+            <div className="relative grid grid-cols-4 items-center">
+              <div className="absolute left-[12.5%] right-[12.5%] top-1/2 h-0.5 -translate-y-1/2 bg-slate-700" />
               <div
-                className={`absolute left-[18%] top-1/2 h-0.5 -translate-y-1/2 bg-purple-400 transition-all ${
-                  step === "pay" ? "right-[18%]" : "right-1/2"
-                }`}
+                className="absolute left-[12.5%] right-[12.5%] top-1/2 h-0.5 -translate-y-1/2 bg-purple-400 transition-all"
               />
 
-              {checkoutSteps.map(({ label, icon: Icon }, index) => {
-                const isComplete = index < 2 || (step === "pay" && index === 2);
-                const isCurrent = index === 2 && step !== "pay";
-
+              {checkoutSteps.map(({ label, icon: Icon, target }, index) => {
+                const isComplete = index < 3 || step === "pay";
+                const isCurrent = target === "checkout" && step !== "pay";
                 return (
                   <div
                     key={label}
                     className="relative z-10 flex justify-center"
                   >
-                    <div
-                      className={`flex h-12 w-12 items-center justify-center rounded-full border-2 shadow-lg transition ${
+                    <button
+                      type="button"
+                      onClick={() => onProgressStepClick(target)}
+                      className={`flex h-12 w-12 items-center justify-center rounded-full border-2 shadow-lg transition hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-purple-400/25 ${
                         isComplete
                           ? "border-purple-200 bg-purple-500 text-white shadow-purple-950/30"
                           : isCurrent
@@ -324,11 +382,11 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
                           : "border-slate-600 bg-slate-900 text-slate-300 shadow-slate-950/30"
                       }`}
                       title={label}
-                      aria-label={label}
+                      aria-label={`Go to ${label}`}
                       aria-current={isCurrent ? "step" : undefined}
                     >
                       <Icon size={21} strokeWidth={2.5} />
-                    </div>
+                    </button>
                   </div>
                 );
               })}
@@ -552,7 +610,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
 
               <button
                 type="button"
-                onClick={() => setStep("review")}
+                onClick={() => setCheckoutStep("review")}
                 disabled={!canReview}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -693,7 +751,7 @@ export function CheckoutPanel({ open, cart, delivery, onClose }: Props) {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
-                  onClick={() => setStep("form")}
+                  onClick={() => setCheckoutStep("form")}
                   disabled={loading}
                   className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-slate-300 transition hover:bg-white/10 disabled:opacity-40"
                 >

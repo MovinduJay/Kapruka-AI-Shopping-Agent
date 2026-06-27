@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  CreditCard,
   LoaderCircle,
   MapPin,
+  ShoppingCart,
   Truck,
   X,
   XCircle,
@@ -33,8 +35,23 @@ type Props = {
   open: boolean;
   productId?: string;
   onClose: () => void;
+  onProgressStepClick?: (target: DeliveryPanelTarget) => void;
   onContinueToCheckout?: (result: DeliveryResult) => void;
 };
+
+export type DeliveryPanelTarget = "cart" | "delivery" | "checkout";
+type DeliveryProgressTarget = DeliveryPanelTarget | "date";
+
+const deliverySteps = [
+  { label: "Cart", icon: ShoppingCart, target: "cart" },
+  { label: "Date selection", icon: CalendarDays, target: "date" },
+  { label: "Delivery destination", icon: Truck, target: "delivery" },
+  { label: "Checkout", icon: CreditCard, target: "checkout" },
+] satisfies Array<{
+  label: string;
+  icon: typeof ShoppingCart;
+  target: DeliveryProgressTarget;
+}>;
 
 function getSriLankaDate() {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -93,8 +110,12 @@ export function DeliveryPanel({
   open,
   productId,
   onClose,
+  onProgressStepClick,
   onContinueToCheckout,
 }: Props) {
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const dateSectionRef = useRef<HTMLDivElement | null>(null);
+  const feedbackRef = useRef<HTMLDivElement | null>(null);
   const [city, setCity] = useState("");
   const [selectedDeliveryCity, setSelectedDeliveryCity] = useState("");
   const [deliveryDate, setDeliveryDate] = useState("");
@@ -164,6 +185,19 @@ export function DeliveryPanel({
       window.clearTimeout(timeout);
     };
   }, [city]);
+
+  useEffect(() => {
+    if (!result && !error) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      feedbackRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [error, result]);
 
   async function selectDeliveryDate(date: Date) {
     const value = toDateValue(date);
@@ -240,6 +274,18 @@ export function DeliveryPanel({
     selectDeliveryDate(today);
   }
 
+  function handleProgressStepClick(target: DeliveryProgressTarget) {
+    if (target === "date") {
+      dateSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      return;
+    }
+
+    onProgressStepClick?.(target);
+  }
+
   if (!open) return null;
 
   return (
@@ -255,7 +301,7 @@ export function DeliveryPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby="delivery-panel-title"
-        className="relative flex h-full w-full max-w-lg flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
+        className="relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
       >
         <header className="flex items-start justify-between border-b border-white/10 px-6 py-6">
           <div>
@@ -282,8 +328,47 @@ export function DeliveryPanel({
           </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 overflow-y-auto px-6 py-6"
+        >
           <div className="space-y-5">
+            <div
+              className="checkout-panel-card rounded-3xl border px-5 py-5"
+              aria-label="Delivery progress"
+            >
+              <div className="relative grid grid-cols-4 items-center">
+                <div className="absolute left-[12.5%] right-[12.5%] top-1/2 h-0.5 -translate-y-1/2 bg-slate-700" />
+                <div className="absolute left-[12.5%] right-[37.5%] top-1/2 h-0.5 -translate-y-1/2 bg-purple-400 transition-all" />
+
+                {deliverySteps.map(({ label, icon: Icon, target }, index) => {
+                  const isComplete = index < 2;
+                  const isCurrent = target === "date";
+
+                  return (
+                    <div key={label} className="relative z-10 flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => handleProgressStepClick(target)}
+                        className={`flex h-12 w-12 items-center justify-center rounded-full border-2 shadow-lg transition hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-purple-400/25 ${
+                          isComplete
+                            ? "border-purple-200 bg-purple-500 text-white shadow-purple-950/30"
+                            : isCurrent
+                              ? "border-purple-300 bg-slate-950 text-purple-200 shadow-purple-950/30 ring-4 ring-purple-500/20"
+                              : "border-slate-600 bg-slate-900 text-slate-300 shadow-slate-950/30"
+                        }`}
+                        title={label}
+                        aria-label={`Go to ${label}`}
+                        aria-current={isCurrent ? "step" : undefined}
+                      >
+                        <Icon size={21} strokeWidth={2.5} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
             <label className="relative block">
               <span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-200">
                 <MapPin size={16} className="text-purple-300" />
@@ -346,7 +431,7 @@ export function DeliveryPanel({
               )}
             </label>
 
-            <div>
+            <div ref={dateSectionRef} className="scroll-mt-6">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <span className="flex items-center gap-2 text-sm font-semibold text-slate-200">
                   <CalendarDays size={16} className="text-purple-300" />
@@ -427,7 +512,9 @@ export function DeliveryPanel({
                             ? "bg-purple-100 text-slate-950 shadow-lg shadow-purple-300/30"
                             : isPast || !isCurrentMonth
                               ? "cursor-not-allowed text-slate-600"
-                              : "bg-white/[0.055] text-slate-100 hover:bg-purple-300/20 hover:text-white"
+                              : isToday
+                                ? "bg-purple-100 text-slate-950 ring-1 ring-purple-300/55 hover:bg-purple-200 hover:text-slate-950"
+                                : "bg-white/[0.055] text-slate-100 hover:bg-purple-300/20 hover:text-white"
                         }`}
                       >
                         {isSelected && dateCheckLoading ? (
@@ -436,7 +523,7 @@ export function DeliveryPanel({
                           date.getDate()
                         )}
                         {isToday && !isSelected && (
-                          <span className="absolute top-1 h-1 w-1 rounded-full bg-slate-300" />
+                          <span className="absolute bottom-1.5 h-1 w-1 rounded-full bg-purple-200" />
                         )}
                       </button>
                     );
@@ -468,6 +555,7 @@ export function DeliveryPanel({
 
             {error && (
               <div
+                ref={feedbackRef}
                 role="alert"
                 className="rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4 text-sm leading-6 text-rose-200"
               >
@@ -477,6 +565,7 @@ export function DeliveryPanel({
 
             {result && (
               <div
+                ref={feedbackRef}
                 className={`rounded-3xl border p-5 ${
                   result.available
                     ? "border-purple-400/30 bg-purple-500/10"

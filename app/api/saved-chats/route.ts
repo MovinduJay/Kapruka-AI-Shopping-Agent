@@ -12,6 +12,8 @@ type SavedShoppingChatRow = {
   messagesJson: unknown;
   cartJson: unknown;
   checkedDeliveryJson: unknown;
+  checkoutStateJson: unknown;
+  shoppingFlowStep: string;
   updatedAt: Date;
 };
 
@@ -58,6 +60,8 @@ export async function GET() {
       "messagesJson",
       "cartJson",
       "checkedDeliveryJson",
+      "checkoutStateJson",
+      "shoppingFlowStep",
       "updatedAt"
     FROM "SavedShoppingChat"
     WHERE "sessionId" = ${session.id}
@@ -73,6 +77,8 @@ export async function GET() {
       messages: chat.messagesJson,
       cart: chat.cartJson,
       checkedDelivery: chat.checkedDeliveryJson,
+      checkoutState: chat.checkoutStateJson,
+      shoppingFlowStep: chat.shoppingFlowStep,
     })),
   });
 }
@@ -94,6 +100,8 @@ export async function POST(req: Request) {
     messages?: unknown;
     cart?: unknown;
     checkedDelivery?: unknown;
+    checkoutState?: unknown;
+    shoppingFlowStep?: unknown;
   };
   const id =
     typeof body.id === "string" && body.id.length <= 120
@@ -109,6 +117,15 @@ export async function POST(req: Request) {
   const checkedDeliveryJson = body.checkedDelivery
     ? jsonString(body.checkedDelivery)
     : null;
+  const checkoutStateJson = body.checkoutState
+    ? jsonString(body.checkoutState)
+    : null;
+  const shoppingFlowStep =
+    body.shoppingFlowStep === "delivery" ||
+    body.shoppingFlowStep === "date" ||
+    body.shoppingFlowStep === "checkout"
+      ? body.shoppingFlowStep
+      : "cart";
 
   await prisma.$executeRaw`
     INSERT INTO "SavedShoppingChat" (
@@ -118,6 +135,8 @@ export async function POST(req: Request) {
       "messagesJson",
       "cartJson",
       "checkedDeliveryJson",
+      "checkoutStateJson",
+      "shoppingFlowStep",
       "updatedAt"
     )
     VALUES (
@@ -127,6 +146,8 @@ export async function POST(req: Request) {
       ${messagesJson}::jsonb,
       ${cartJson}::jsonb,
       ${checkedDeliveryJson}::jsonb,
+      ${checkoutStateJson}::jsonb,
+      ${shoppingFlowStep},
       NOW()
     )
     ON CONFLICT ("id") DO UPDATE SET
@@ -134,6 +155,8 @@ export async function POST(req: Request) {
       "messagesJson" = EXCLUDED."messagesJson",
       "cartJson" = EXCLUDED."cartJson",
       "checkedDeliveryJson" = EXCLUDED."checkedDeliveryJson",
+      "checkoutStateJson" = EXCLUDED."checkoutStateJson",
+      "shoppingFlowStep" = EXCLUDED."shoppingFlowStep",
       "updatedAt" = NOW()
   `;
 

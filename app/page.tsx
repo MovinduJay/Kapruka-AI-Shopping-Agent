@@ -24,7 +24,12 @@ import {
 } from "@/components/chat/LocationPrompt";
 import { SearchProgress } from "@/components/chat/SearchProgress";
 import { WelcomeScreen } from "@/components/chat/WelcomeScreen";
-import { CheckoutPanel } from "@/components/checkout/CheckoutPanel";
+import {
+  CheckoutPanel,
+  type CheckoutProgressTarget,
+  createInitialCheckoutState,
+  type CheckoutState,
+} from "@/components/checkout/CheckoutPanel";
 import {
   DeliveryPanel,
   type DeliveryResult,
@@ -55,7 +60,11 @@ type SavedShoppingChat = {
   messages: ChatMessage[];
   cart: CartItem[];
   checkedDelivery: DeliveryResult | null;
+  checkoutState: CheckoutState | null;
+  shoppingFlowStep: ShoppingFlowStep;
 };
+
+type ShoppingFlowStep = "cart" | "delivery" | "date" | "checkout";
 
 type ChatStreamPart = {
   type: string;
@@ -207,7 +216,7 @@ function SavedChatCard({ chat, active, onOpen }: SavedChatCardProps) {
     <button
       type="button"
       onClick={() => onOpen(chat)}
-      className={`group w-full rounded-3xl border p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-purple-300/70 hover:shadow-[0_16px_42px_-28px_rgba(64,41,112,0.7)] ${
+      className={`group w-full rounded-3xl border p-4 text-left shadow-sm transition hover:border-purple-300/70 hover:bg-purple-500/[0.08] hover:shadow-[0_16px_42px_-28px_rgba(64,41,112,0.7)] ${
         active
           ? "border-purple-300/60 bg-purple-500/10"
           : "border-white/10 bg-white/[0.045]"
@@ -270,6 +279,68 @@ function getSavedChatTitle(messages: ChatMessage[]) {
   return title.length > 88 ? `${title.slice(0, 85)}...` : title;
 }
 
+function normalizeCheckoutState(value: unknown): CheckoutState {
+  const fallback = createInitialCheckoutState();
+
+  if (!value || typeof value !== "object") return fallback;
+
+  const candidate = value as Partial<CheckoutState>;
+  const form =
+    candidate.form && typeof candidate.form === "object"
+      ? {
+          ...fallback.form,
+          ...candidate.form,
+        }
+      : fallback.form;
+  const step =
+    candidate.step === "review" || candidate.step === "pay"
+      ? candidate.step
+      : "form";
+
+  return {
+    form,
+    step,
+    result: candidate.result || null,
+  };
+}
+
+function normalizeShoppingFlowStep(
+  value: unknown,
+  chat: Pick<SavedShoppingChat, "cart" | "checkedDelivery"> & {
+    checkoutState?: CheckoutState | null;
+  }
+): ShoppingFlowStep {
+  if (value === "cart" || value === "delivery" || value === "checkout") {
+    return value;
+  }
+
+  if (value === "date") return value;
+
+  if (chat.checkoutState?.step !== "form" || chat.checkoutState?.result) {
+    return "checkout";
+  }
+
+  if (chat.checkedDelivery?.available) {
+    return "checkout";
+  }
+
+  return chat.cart.length > 0 ? "cart" : "cart";
+}
+
+function normalizeSavedShoppingChat(chat: SavedShoppingChat): SavedShoppingChat {
+  const checkoutState = normalizeCheckoutState(chat.checkoutState);
+
+  return {
+    ...chat,
+    updatedAt: typeof chat.updatedAt === "number" ? chat.updatedAt : 0,
+    checkoutState,
+    shoppingFlowStep: normalizeShoppingFlowStep(chat.shoppingFlowStep, {
+      ...chat,
+      checkoutState,
+    }),
+  };
+}
+
 function loadSavedChats(): SavedShoppingChat[] {
   try {
     const raw = window.localStorage.getItem(savedChatsKey);
@@ -278,6 +349,8 @@ function loadSavedChats(): SavedShoppingChat[] {
     return Array.isArray(parsed)
       ? parsed
           .filter((chat) => chat && typeof chat.id === "string")
+          .map(normalizeSavedShoppingChat)
+          .sort((a, b) => b.updatedAt - a.updatedAt)
           .slice(0, 20)
       : [];
   } catch {
@@ -312,14 +385,17 @@ function updateSavedChatSnapshot(
 }
 
 function formatSavedChatAge(updatedAt: number) {
-  const diff = Date.now() - updatedAt;
+  const diff = Math.max(0, Date.now() - updatedAt);
+  const second = 1_000;
   const minute = 60_000;
   const hour = 60 * minute;
   const day = 24 * hour;
 
-  if (diff < hour) return `${Math.max(1, Math.round(diff / minute))}m ago`;
-  if (diff < day) return `${Math.round(diff / hour)}h ago`;
-  return `${Math.round(diff / day)}d ago`;
+  if (diff < 10 * second) return "Just now";
+  if (diff < minute) return `${Math.floor(diff / second)}s ago`;
+  if (diff < hour) return `${Math.floor(diff / minute)}m ago`;
+  if (diff < day) return `${Math.floor(diff / hour)}h ago`;
+  return `${Math.floor(diff / day)}d ago`;
 }
 
 function getSavedChatImageProduct(chat: SavedShoppingChat) {
@@ -446,6 +522,11 @@ export default function Home() {
   const [checkoutPanelOpen, setCheckoutPanelOpen] = useState(false);
   const [checkedDelivery, setCheckedDelivery] =
     useState<DeliveryResult | null>(null);
+  const [checkoutState, setCheckoutState] = useState<CheckoutState>(() =>
+    createInitialCheckoutState()
+  );
+  const [shoppingFlowStep, setShoppingFlowStep] =
+    useState<ShoppingFlowStep>("cart");
   const [sharedLocation, setSharedLocation] =
     useState<SharedLocation | null>(null);
   const [locationPromptDismissed, setLocationPromptDismissed] = useState(false);
@@ -475,23 +556,6 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!chatStarted && messages.length === 0 && cart.length === 0) return;
-
-    const saved = loadSavedChats();
-    saveShoppingChats([
-      {
-        id: activeChatId,
-        title: getSavedChatTitle(messages),
-        updatedAt: Date.now(),
-        messages,
-        cart,
-        checkedDelivery,
-      },
-      ...saved.filter((chat) => chat.id !== activeChatId),
-    ]);
-  }, [activeChatId, cart, chatStarted, checkedDelivery, messages]);
-
-  useEffect(() => {
     const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
       const scrollElement = chatScrollRef.current;
 
@@ -517,7 +581,9 @@ export default function Home() {
   function persistActiveChatSnapshot(
     nextMessages: ChatMessage[] = messages,
     nextCart: CartItem[] = cart,
-    nextDelivery: DeliveryResult | null = checkedDelivery
+    nextDelivery: DeliveryResult | null = checkedDelivery,
+    nextCheckoutState: CheckoutState = checkoutState,
+    nextShoppingFlowStep: ShoppingFlowStep = shoppingFlowStep
   ) {
     if (!chatStarted && nextMessages.length === 0 && nextCart.length === 0) {
       return;
@@ -529,11 +595,14 @@ export default function Home() {
         messages: nextMessages,
         cart: nextCart,
         checkedDelivery: nextDelivery,
+        checkoutState: nextCheckoutState,
+        shoppingFlowStep: nextShoppingFlowStep,
       })
     );
   }
 
   function addToCart(product: ProductCardType) {
+    setShoppingFlowStep("cart");
     setCart((prev) => {
       const existing = prev.find((item) => item.id === product.id);
       const next = existing
@@ -549,13 +618,20 @@ export default function Home() {
         action: "add_to_cart",
       });
       postObservabilityEvent("/api/observability/cart", { cart: next });
-      persistActiveChatSnapshot(messages, next);
+      persistActiveChatSnapshot(
+        messages,
+        next,
+        checkedDelivery,
+        checkoutState,
+        "cart"
+      );
 
       return next;
     });
   }
 
   function changeCartQuantity(productId: string, change: number) {
+    setShoppingFlowStep("cart");
     setCart((prev) => {
       const next = prev
         .map((item) =>
@@ -569,12 +645,19 @@ export default function Home() {
         .filter((item) => item.quantity > 0);
 
       postObservabilityEvent("/api/observability/cart", { cart: next });
-      persistActiveChatSnapshot(messages, next);
+      persistActiveChatSnapshot(
+        messages,
+        next,
+        checkedDelivery,
+        checkoutState,
+        "cart"
+      );
       return next;
     });
   }
 
   function removeFromCart(productId: string) {
+    setShoppingFlowStep("cart");
     setCart((prev) => {
       const product = prev.find((item) => item.id === productId);
       const next = prev.filter((item) => item.id !== productId);
@@ -587,10 +670,28 @@ export default function Home() {
       }
 
       postObservabilityEvent("/api/observability/cart", { cart: next });
-      persistActiveChatSnapshot(messages, next);
+      persistActiveChatSnapshot(
+        messages,
+        next,
+        checkedDelivery,
+        checkoutState,
+        "cart"
+      );
 
       return next;
     });
+  }
+
+  function handleCheckoutStateChange(nextCheckoutState: CheckoutState) {
+    setCheckoutState(nextCheckoutState);
+    setShoppingFlowStep("checkout");
+    persistActiveChatSnapshot(
+      messages,
+      cart,
+      checkedDelivery,
+      nextCheckoutState,
+      "checkout"
+    );
   }
 
   function viewProductDetails(product: ProductCardType) {
@@ -626,6 +727,8 @@ export default function Home() {
     setMessages(chat.messages || []);
     setCart(chat.cart || []);
     setCheckedDelivery(chat.checkedDelivery || null);
+    setCheckoutState(normalizeCheckoutState(chat.checkoutState));
+    setShoppingFlowStep(chat.shoppingFlowStep || "cart");
     setChatStarted((chat.messages || []).length > 0);
     setInput("");
     setLoading(false);
@@ -642,6 +745,8 @@ export default function Home() {
     setMessages([]);
     setCart([]);
     setCheckedDelivery(null);
+    setCheckoutState(createInitialCheckoutState());
+    setShoppingFlowStep("cart");
     setChatStarted(false);
     setInput("");
     setLoading(false);
@@ -667,7 +772,10 @@ export default function Home() {
       const data = (await response.json()) as { chats?: SavedShoppingChat[] };
 
       if (response.ok && Array.isArray(data.chats)) {
-        const next = data.chats.slice(0, 20);
+        const next = data.chats
+          .map(normalizeSavedShoppingChat)
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .slice(0, 20);
         setSavedChats(next);
         saveShoppingChats(next);
       }
@@ -682,6 +790,41 @@ export default function Home() {
       setSavedChatsOpen(false);
       setSavedChatsClosing(false);
     }, 260);
+  }
+
+  function openCurrentShoppingStep() {
+    if (shoppingFlowStep === "checkout") {
+      setCartOpen(false);
+      setDeliveryPanelOpen(false);
+      setCheckoutPanelOpen(true);
+      return;
+    }
+
+    if (shoppingFlowStep === "delivery" || shoppingFlowStep === "date") {
+      setCartOpen(false);
+      setCheckoutPanelOpen(false);
+      setDeliveryPanelOpen(true);
+      return;
+    }
+
+    setDeliveryPanelOpen(false);
+    setCheckoutPanelOpen(false);
+    setCartOpen(true);
+  }
+
+  function openShoppingFlowTarget(target: CheckoutProgressTarget) {
+    setShoppingFlowStep(target);
+    persistActiveChatSnapshot(
+      messages,
+      cart,
+      checkedDelivery,
+      checkoutState,
+      target
+    );
+
+    setCartOpen(target === "cart");
+    setDeliveryPanelOpen(target === "delivery" || target === "date");
+    setCheckoutPanelOpen(target === "checkout");
   }
 
   async function sendMessage(message?: string) {
@@ -716,6 +859,8 @@ export default function Home() {
         messages: nextMessages,
         cart,
         checkedDelivery,
+        checkoutState,
+        shoppingFlowStep,
       })
     );
 
@@ -851,6 +996,8 @@ export default function Home() {
           messages: currentMessages,
           cart,
           checkedDelivery,
+          checkoutState,
+          shoppingFlowStep,
         })
       );
     } catch (error) {
@@ -888,6 +1035,8 @@ export default function Home() {
           messages: currentMessages,
           cart,
           checkedDelivery,
+          checkoutState,
+          shoppingFlowStep,
         })
       );
     } finally {
@@ -1021,7 +1170,7 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => setCartOpen(true)}
+                onClick={openCurrentShoppingStep}
                 aria-label={`Open cart with ${cartQuantity} items`}
                 className="group relative flex shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3.5 py-3 text-sm font-semibold text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-purple-400/60 hover:bg-purple-500/15 hover:shadow-[0_12px_30px_-14px_rgba(64,41,112,0.55)] active:translate-y-0 active:scale-95"
               >
@@ -1289,6 +1438,9 @@ export default function Home() {
                 onClick={startNewChat}
                 className="flex w-full items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-purple-400"
               >
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/15">
+                  <Plus size={16} strokeWidth={2.5} />
+                </span>
                 Start new shopping chat
               </button>
 
@@ -1325,7 +1477,7 @@ export default function Home() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="cart-title"
-            className="cart-drawer relative flex h-full w-full max-w-md flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
+            className="cart-drawer relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
           >
             <div className="flex items-center justify-between border-b border-white/10 p-6">
               <div className="flex items-center gap-3">
@@ -1373,6 +1525,14 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => {
+                      setShoppingFlowStep("delivery");
+                      persistActiveChatSnapshot(
+                        messages,
+                        cart,
+                        checkedDelivery,
+                        checkoutState,
+                        "delivery"
+                      );
                       setCartOpen(false);
                       setDeliveryPanelOpen(true);
                     }}
@@ -1391,9 +1551,17 @@ export default function Home() {
         open={deliveryPanelOpen}
         productId={cart[0]?.id}
         onClose={() => setDeliveryPanelOpen(false)}
+        onProgressStepClick={openShoppingFlowTarget}
         onContinueToCheckout={(result) => {
           setCheckedDelivery(result);
-          persistActiveChatSnapshot(messages, cart, result);
+          setShoppingFlowStep("checkout");
+          persistActiveChatSnapshot(
+            messages,
+            cart,
+            result,
+            checkoutState,
+            "checkout"
+          );
           setDeliveryPanelOpen(false);
           setCheckoutPanelOpen(true);
         }}
@@ -1414,6 +1582,9 @@ export default function Home() {
         open={checkoutPanelOpen}
         cart={cart}
         delivery={checkedDelivery}
+        checkoutState={checkoutState}
+        onCheckoutStateChange={handleCheckoutStateChange}
+        onProgressStepClick={openShoppingFlowTarget}
         onClose={() => setCheckoutPanelOpen(false)}
       />
     </main>
