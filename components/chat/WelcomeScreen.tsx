@@ -59,29 +59,6 @@ const suggestions = [
   },
 ];
 
-const quickIntents = [
-  {
-    label: "Buy again",
-    prompt: "I want to reorder something from a previous cart",
-  },
-  {
-    label: "Track order",
-    prompt: "Track my Kapruka order",
-  },
-  {
-    label: "Birthday gift",
-    prompt: "Help me choose a birthday gift",
-  },
-  {
-    label: "Same-day delivery",
-    prompt: "Show me things I can send quickly",
-  },
-  {
-    label: "Under Rs. 10,000",
-    prompt: "Show me good options under Rs. 10,000",
-  },
-];
-
 type WelcomeProduct = {
   key: string;
   name: string;
@@ -160,8 +137,12 @@ export function WelcomeScreen({
   return (
     <div className="flex flex-1 items-center overflow-y-auto px-4 pb-12 pt-7 font-sans sm:px-6 sm:pb-16">
       <div className="mx-auto w-full max-w-6xl text-center">
-        <div className="mx-auto flex h-40 w-40 items-center justify-center drop-shadow-[0_24px_42px_rgba(64,41,112,0.22)] sm:h-52 sm:w-52">
-          <BrandLogo size={208} priority />
+        <div className="mx-auto flex h-44 w-44 items-center justify-center overflow-visible drop-shadow-[0_24px_42px_rgba(64,41,112,0.22)] sm:h-56 sm:w-56">
+          <BrandLogo
+            size={188}
+            priority
+            className="translate-y-2 sm:h-[204px] sm:w-[204px]"
+          />
         </div>
 
         <h2 className="mt-1 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-6xl">
@@ -191,19 +172,6 @@ export function WelcomeScreen({
           >
             <Send size={18} />
           </button>
-        </div>
-
-        <div className="mx-auto mt-4 flex max-w-3xl flex-wrap justify-center gap-2">
-          {quickIntents.map((intent) => (
-            <button
-              key={intent.label}
-              type="button"
-              onClick={() => onSubmit(intent.prompt)}
-              className="rounded-full border border-white/10 bg-white/[0.055] px-4 py-2 text-sm font-semibold text-slate-300 transition hover:border-purple-300/60 hover:bg-purple-500/10 hover:text-purple-200"
-            >
-              {intent.label}
-            </button>
-          ))}
         </div>
 
         <div className="mx-auto mt-7 flex max-w-6xl items-center gap-3 pb-10 sm:gap-4 sm:pb-14">
