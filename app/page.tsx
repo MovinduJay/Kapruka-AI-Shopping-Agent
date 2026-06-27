@@ -1125,7 +1125,11 @@ export default function Home() {
       className="app-theme min-h-screen bg-slate-950 text-white"
     >
       <section className="relative flex h-screen min-w-0 flex-col overflow-hidden">
-        <header className="border-b border-white/10 px-4 py-4 sm:px-6">
+        <header
+          className={`px-4 py-4 sm:px-6 ${
+            isWelcome ? "" : "border-b border-white/10"
+          }`}
+        >
           <button
             type="button"
             onClick={openSavedChatsDrawer}
@@ -1142,18 +1146,22 @@ export default function Home() {
 
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-3 pl-10 sm:pl-11">
-              <div className="shrink-0">
-                <BrandLogo size={64} priority />
-              </div>
+              {!isWelcome && (
+                <>
+                  <div className="shrink-0">
+                    <BrandLogo size={64} priority />
+                  </div>
 
-              <div className="min-w-0">
-                <h1 className="text-xl font-bold sm:text-2xl">
-                  Kapruka AI Concierge
-                </h1>
-                <p className="hidden text-sm text-slate-400 sm:block">
-                  Electronics, groceries, fashion, home, gifts, and more
-                </p>
-              </div>
+                  <div className="min-w-0">
+                    <h1 className="text-xl font-bold sm:text-2xl">
+                      Kapruka AI Concierge
+                    </h1>
+                    <p className="hidden text-sm text-slate-400 sm:block">
+                      Electronics, groceries, fashion, home, gifts, and more
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="flex items-center gap-2">

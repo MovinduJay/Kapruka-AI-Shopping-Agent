@@ -135,13 +135,13 @@ export function WelcomeScreen({
   }
 
   return (
-    <div className="flex flex-1 items-center overflow-hidden px-4 py-10 font-sans sm:px-6">
+    <div className="flex flex-1 items-center overflow-y-auto px-4 pb-12 pt-7 font-sans sm:px-6 sm:pb-16">
       <div className="mx-auto w-full max-w-6xl text-center">
-        <div className="mx-auto flex h-40 w-40 items-center justify-center drop-shadow-[0_24px_42px_rgba(64,41,112,0.22)] sm:h-48 sm:w-48">
-          <BrandLogo size={192} priority />
+        <div className="mx-auto flex h-40 w-40 items-center justify-center drop-shadow-[0_24px_42px_rgba(64,41,112,0.22)] sm:h-52 sm:w-52">
+          <BrandLogo size={208} priority />
         </div>
 
-        <h2 className="mt-2 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-5xl">
+        <h2 className="mt-1 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-6xl">
           Shop across Kapruka.
         </h2>
         <p className="mx-auto mt-3 max-w-2xl text-xl tracking-[-0.02em] text-slate-300 sm:text-3xl">
@@ -170,7 +170,7 @@ export function WelcomeScreen({
           </button>
         </div>
 
-        <div className="mx-auto mt-6 flex max-w-6xl items-center gap-3 sm:gap-4">
+        <div className="mx-auto mt-6 flex max-w-6xl items-center gap-3 pb-8 sm:gap-4 sm:pb-10">
           <button
             type="button"
             onClick={() => scrollCategories("left")}
