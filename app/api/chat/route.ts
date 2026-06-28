@@ -15,6 +15,10 @@ import {
   mergeAgentMemoryForPersistence,
   persistAgentRun,
 } from "@/lib/agent-persistence";
+import {
+  extractKaprukaProductImages,
+  normalizeKaprukaImageUrl,
+} from "@/lib/kapruka-images";
 
 type GroqOutputContent = {
   type?: string;
@@ -128,6 +132,7 @@ type DeliveryCheckResult = {
 };
 
 const productMetadataCache = new Map<string, ProductPageMetadata | null>();
+const productMcpMetadataCache = new Map<string, ProductPageMetadata | null>();
 const PRODUCT_CARD_LIMIT = 8;
 const SEARCH_RESULT_LIMIT = 20;
 const MCP_URL =
@@ -475,14 +480,14 @@ function pickNestedImageUrl(obj: AnyRecord) {
     "picture_url",
   ]);
 
-  if (direct) return normalizeUrl(direct);
+  if (direct) return normalizeKaprukaImageUrl(direct);
 
   const images = obj.images;
 
   if (Array.isArray(images)) {
     for (const image of images) {
       if (typeof image === "string") {
-        const url = normalizeUrl(image);
+        const url = normalizeKaprukaImageUrl(image);
         if (url) return url;
       }
 
@@ -498,7 +503,7 @@ function pickNestedImageUrl(obj: AnyRecord) {
           "small",
         ]);
 
-        if (nested) return normalizeUrl(nested);
+        if (nested) return normalizeKaprukaImageUrl(nested);
       }
     }
   }
@@ -708,7 +713,7 @@ function cleanSearchQuery(message: string) {
     )
     .replace(/\b(?:rs\.?|lkr)\s*[\d,]+(?:\.\d+)?\s*k?\b/gi, " ")
     .replace(
-      /\b(?:please|pls|just|show me|show|find me|find|get me|give me|give|search for|search|browse for|browse|shop for|shop|looking for|look for|i need|i want|n+e{2,}d|need|want|recommend me|recommend|suggest me|suggest|choose from|to choose|within|best[ -]value|more|may be|maybe)\b/gi,
+      /\b(?:please|pls|just|show\s*me|show|find me|find|get me|give me|give|search for|search|browse for|browse|shop for|shop|looking for|look for|i need|i want|n+e{2,}d|need|want|recommend me|recommend|suggest me|suggest|choose from|to choose|within|best[ -]value|more|may be|maybe)\b/gi,
       " "
     )
     .replace(
@@ -772,7 +777,7 @@ function hasSearchableProductPhrase(message: string) {
 }
 
 function isSearchConfirmation(message: string) {
-  return /^(?:\?+|yes(?: please| pls| plz)?|yeah(?: please| pls| plz)?|yep(?: please| pls| plz)?|sure(?: please| pls| plz)?|okay|ok|please|pls|plz|please do|do it|go ahead|sounds good|show me|show them|send them)$/i.test(
+  return /^(?:\?+|yes(?: please| pls| plz|\s*show\s*me)?|yeah(?: please| pls| plz|\s*show\s*me)?|yep(?: please| pls| plz|\s*show\s*me)?|sure(?: please| pls| plz|\s*show\s*me)?|okay|ok|please|pls|plz|please do|do it|go ahead|sounds good|show\s*me|show them|send them)$/i.test(
     message.trim()
   );
 }
@@ -805,10 +810,25 @@ function recentSearchableUserContext(history: ChatHistoryMessage[]) {
     .slice()
     .reverse()
     .find(
-      (item) =>
-        item.role === "user" &&
-        (hasSearchableProductPhrase(item.content) ||
-          extractBudget(item.content, {}) !== null)
+      (item) => {
+        if (item.role !== "user") return false;
+
+        const tokens = searchTokens(item.content);
+        const styleOnly =
+          tokens.length > 0 &&
+          tokens.length <= 2 &&
+          tokens.every((token) =>
+            /^(?:casual|basic|basics|plain|graphic|print|prints|sporty|sportier|formal|office|cotton|crew|crewneck|white|black|grey|gray|navy)$/.test(
+              token
+            )
+          );
+
+        return (
+          extractBudget(item.content, {}) !== null ||
+          hasConcreteShoppingSubject(item.content) ||
+          (hasSearchableProductPhrase(item.content) && !styleOnly)
+        );
+      }
     )?.content;
 }
 
@@ -819,10 +839,86 @@ function recentShoppingContext(history: ChatHistoryMessage[]) {
     .find(
       (item) =>
         item.role === "user" &&
-        /\b(?:gift|birthday|anniversary|mother|mom|mum|amma|father|dad|wife|husband|girlfriend|boyfriend|friend|flowers?|cakes?|hampers?|gadgets?|electronics?|devices?|accessories|speakers?|chargers?|powerbanks?|headphones?|earbuds?|watches?|phones?|laptops?|toys?|bags?|shoes?|groceries|rice cooker)\b/i.test(
+        /\b(?:gift|birthday|anniversary|mother|mom|mum|amma|father|dad|wife|husband|girlfriend|boyfriend|friend|flowers?|cakes?|hampers?|gadgets?|electronics?|devices?|accessories|speakers?|chargers?|powerbanks?|headphones?|earbuds?|watches?|phones?|laptops?|toys?|bags?|shoes?|dress|shirts?|t-?shirts?|tee\s*shirts?|tees?|groceries|rice cooker)\b/i.test(
           item.content
         )
     )?.content;
+}
+
+function recentConcreteProductContext(history: ChatHistoryMessage[]) {
+  return history
+    .slice()
+    .reverse()
+    .find((item) => item.role === "user" && hasConcreteShoppingSubject(item.content))
+    ?.content;
+}
+
+function isPronounProductCardFollowUp(message: string) {
+  const normalized = stripExcludedProductsInstruction(message)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return /\b(?:show|send|pull|display)\b[\s\S]{0,35}\b(?:cards?|them|those)\b|\b(?:cards?|them|those)\b[\s\S]{0,25}\b(?:show|send|pull|display)\b/i.test(
+    normalized
+  );
+}
+
+function isSendBunchFollowUp(message: string) {
+  const normalized = stripExcludedProductsInstruction(message)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return /\b(?:send|show|give)\b[\s\S]{0,20}\b(?:bunch|batch|lot|few|some)\b|\bno\s+just\s+send\b/i.test(
+    normalized
+  );
+}
+
+function isBudgetOnlyFollowUp(message: string) {
+  const normalized = stripExcludedProductsInstruction(message)
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return (
+    extractBudget(normalized, {}) !== null &&
+    searchTokens(normalized).length === 0
+  );
+}
+
+function isShortSearchRefinement(
+  message: string,
+  history: ChatHistoryMessage[]
+) {
+  const normalized = stripExcludedProductsInstruction(message)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized || normalized.split(/\s+/).length > 5) return false;
+
+  const recentProductRequest = recentSearchableUserContext(history);
+  const recentAssistantQuestion = history
+    .slice()
+    .reverse()
+    .find(
+      (item) =>
+        item.role === "assistant" &&
+        /\b(?:what kind|what style|what vibe|casual basics|graphic prints|sportier|plain|cotton|crew-neck|crew neck|white|navy|grey|gray|line up|pull together|show|options?)\b/i.test(
+          item.content
+        )
+    );
+
+  return (
+    Boolean(recentProductRequest && recentAssistantQuestion) &&
+    /\b(?:casual|basic|basics|plain|graphic|print|prints|sporty|sportier|formal|office|cotton|crew|crewneck|crew-neck|white|black|grey|gray|navy|bunch|batch|lot|few|some)\b/i.test(
+      normalized
+    )
+  );
 }
 
 function effectiveProductSearchContext(
@@ -831,10 +927,23 @@ function effectiveProductSearchContext(
 ) {
   const cleanedMessage = stripExcludedProductsInstruction(message) || message;
   const previousSearch = recentSearchableUserContext(history);
+  const previousConcreteSearch =
+    recentConcreteProductContext(history) || previousSearch;
+
+  if (
+    previousConcreteSearch &&
+    (isPronounProductCardFollowUp(cleanedMessage) ||
+      isSendBunchFollowUp(cleanedMessage) ||
+      isBudgetOnlyFollowUp(cleanedMessage))
+  ) {
+    return `${previousConcreteSearch} ${cleanedMessage}`;
+  }
 
   if (
     previousSearch &&
-    (isMoreProductFollowUp(cleanedMessage) || isSearchConfirmation(cleanedMessage))
+    (isMoreProductFollowUp(cleanedMessage) ||
+      isSearchConfirmation(cleanedMessage) ||
+      isShortSearchRefinement(cleanedMessage, history))
   ) {
     return `${previousSearch} ${cleanedMessage}`;
   }
@@ -934,6 +1043,8 @@ function buildSearchQueries(
     queries.push("wireless earbuds", "earbuds", "wireless earphones");
   } else if (/\b(?:headphones?|headsets?)\b/i.test(cleaned)) {
     queries.push("wireless headphones", "headphones", "bluetooth headset");
+  } else if (/\b(?:t-?shirts?|tee\s*shirts?|tees?)\b/i.test(cleaned)) {
+    queries.push("t shirts", "tee shirts", "mens t shirts", "casual shirts");
   } else if (/\b(?:wristwatch|smartwatch|watches?)\b/i.test(cleaned)) {
     queries.push("watches", "wristwatch", "smartwatch");
   } else if (/\b(?:flowers?|bouquets?|roses?)\b/i.test(cleaned)) {
@@ -1045,6 +1156,9 @@ async function searchKaprukaProductsDirect(
   const attempts: Array<{ q: string; category: string | null }> = [];
   const products: ProductLike[] = [];
   const excludedNames = excludedProductNamesFromMessage(message);
+  const needsImageBackfill = /\b(?:t-?shirts?|tee\s*shirts?|tees?|shirts?|dress|shoes?|bags?)\b/i.test(
+    searchMessage
+  );
 
   for (const [index, query] of queries.entries()) {
     const preferredCategory = categoryForSearchQuery(query);
@@ -1089,10 +1203,23 @@ async function searchKaprukaProductsDirect(
 
       products.push(...attemptProducts);
 
-      if (attemptProducts.length > 0) break;
+      if (
+        attemptProducts.length > 0 &&
+        (!needsImageBackfill ||
+          mergeProducts(products, []).length >= PRODUCT_CARD_LIMIT)
+      ) {
+        break;
+      }
     }
 
-    if (!diversifySearch && products.length >= PRODUCT_CARD_LIMIT) break;
+    if (
+      !diversifySearch &&
+      (!needsImageBackfill
+        ? products.length >= PRODUCT_CARD_LIMIT
+        : mergeProducts(products, []).length >= PRODUCT_CARD_LIMIT)
+    ) {
+      break;
+    }
   }
 
   return { products: mergeProducts(products, []), attempts };
@@ -1708,7 +1835,7 @@ function metadataFromProductJsonLd(product: AnyRecord): ProductPageMetadata {
 
   return {
     imageUrl:
-      typeof rawImage === "string" ? normalizeUrl(rawImage) : null,
+      typeof rawImage === "string" ? normalizeKaprukaImageUrl(rawImage) : null,
     price: offers ? pickNumber(offers, ["price"]) : null,
     compareAtPrice: null,
     inStock: availability
@@ -1770,21 +1897,8 @@ async function getMetadataFromProductPage(productUrl: string) {
     );
     const displayedOriginalPrice = extractDisplayedPrice(html, "pricelbl");
 
-    const imageMatch =
-      html.match(
-        /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
-      ) ||
-      html.match(
-        /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i
-      ) ||
-      html.match(
-        /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i
-      ) ||
-      html.match(
-        /<img[^>]+src=["']([^"']+)["'][^>]+(?:class|id)=["'][^"']*(?:product|main|large)[^"']*["']/i
-      );
-
-    const imageUrl = normalizeUrl(imageMatch?.[1]);
+    const productPageUrl = new URL(productUrl);
+    const imageUrl = extractKaprukaProductImages(html, productPageUrl)[0] || null;
     const metadata = jsonLdProduct
       ? metadataFromProductJsonLd(jsonLdProduct)
       : {
@@ -1822,14 +1936,95 @@ async function getMetadataFromProductPage(productUrl: string) {
   }
 }
 
+async function getMetadataFromMcpProduct(productId: string) {
+  if (!looksLikeKaprukaProductId(productId)) return null;
+
+  if (productMcpMetadataCache.has(productId)) {
+    return productMcpMetadataCache.get(productId) || null;
+  }
+
+  try {
+    const headers = await startDirectMcpSession();
+    const result = await callDirectMcpTool(
+      headers,
+      9001,
+      "kapruka_get_product",
+      {
+        product_id: productId,
+        currency: "LKR",
+      }
+    );
+    const parsed = parseMcpToolJson(result);
+    const productObject =
+      (parsed && collectProductObjects(parsed)[0]) ||
+      (isRecord(parsed) ? parsed : null);
+    const product = productObject ? productFromObject(productObject, 0) : null;
+    const metadata: ProductPageMetadata | null = product
+      ? {
+          imageUrl: product.imageUrl || null,
+          price: product.price,
+          compareAtPrice: product.compareAtPrice ?? null,
+          inStock: product.inStock ?? null,
+          description: product.description || null,
+          rating: product.rating ?? null,
+          reviewCount: product.reviewCount ?? null,
+          brand: product.brand || null,
+          category: product.category || null,
+          freeShipping: product.freeShipping ?? null,
+          priceValidUntil: product.priceValidUntil || null,
+        }
+      : null;
+
+    productMcpMetadataCache.set(productId, metadata);
+    return metadata;
+  } catch (error) {
+    console.warn("Could not fetch product metadata from MCP:", productId, error);
+    productMcpMetadataCache.set(productId, null);
+    return null;
+  }
+}
+
 async function enrichProductsWithMetadata(products: ProductLike[]) {
   return Promise.all(
     products.map(async (product) => {
-      if (!product.productUrl) {
+      if (!product.productUrl && !looksLikeKaprukaProductId(product.id)) {
         return product;
       }
 
-      const metadata = await getMetadataFromProductPage(product.productUrl);
+      const pageMetadata = product.productUrl
+        ? await getMetadataFromProductPage(product.productUrl)
+        : null;
+      const mcpMetadata =
+        product.imageUrl || pageMetadata?.imageUrl
+          ? null
+          : await getMetadataFromMcpProduct(product.id);
+      const metadata =
+        pageMetadata || mcpMetadata
+          ? {
+              ...mcpMetadata,
+              ...pageMetadata,
+              imageUrl: pageMetadata?.imageUrl || mcpMetadata?.imageUrl || null,
+              price: pageMetadata?.price ?? mcpMetadata?.price ?? null,
+              compareAtPrice:
+                pageMetadata?.compareAtPrice ??
+                mcpMetadata?.compareAtPrice ??
+                null,
+              inStock: pageMetadata?.inStock ?? mcpMetadata?.inStock ?? null,
+              description:
+                pageMetadata?.description || mcpMetadata?.description || null,
+              rating: pageMetadata?.rating ?? mcpMetadata?.rating ?? null,
+              reviewCount:
+                pageMetadata?.reviewCount ?? mcpMetadata?.reviewCount ?? null,
+              brand: pageMetadata?.brand || mcpMetadata?.brand || null,
+              category: pageMetadata?.category || mcpMetadata?.category || null,
+              freeShipping:
+                pageMetadata?.freeShipping ?? mcpMetadata?.freeShipping ?? null,
+              priceValidUntil:
+                pageMetadata?.priceValidUntil ||
+                mcpMetadata?.priceValidUntil ||
+                null,
+            }
+          : null;
 
       if (!metadata) return product;
 
@@ -2101,7 +2296,7 @@ function buildMemoryPatch(
 }
 
 function hasConcreteShoppingSubject(message: string) {
-  return /\b(?:gift|gifts|present|presents|flower|flowers|bouquet|rose|roses|cake|cakes|chocolate|chocolates|hamper|hampers|mug|mugs|perfume|watch|watches|phone|phones|laptop|laptops|earbuds|headphones|gadget|gadgets|electronics?|device|devices|accessories|speaker|speakers|charger|chargers|powerbank|powerbanks|toy|toys|book|books|shoes|bag|bags|wallet|wallets|dress|shirt|saree|groceries|grocery|tea|coffee|fruit|fruits|snack|snacks|cookie|cookies|biscuit|biscuits|chips|nuts|sweets|candy|food|drink|drinks|beverage|beverages|gift\s+(?:box|set|basket|pack)|birthday\s+(?:cake|gift)|anniversary\s+gift)\b/i.test(
+  return /\b(?:gift|gifts|present|presents|flower|flowers|bouquet|rose|roses|cake|cakes|chocolate|chocolates|hamper|hampers|mug|mugs|perfume|watch|watches|phone|phones|laptop|laptops|earbuds|headphones|gadget|gadgets|electronics?|device|devices|accessories|speaker|speakers|charger|chargers|powerbank|powerbanks|toy|toys|book|books|shoes|bag|bags|wallet|wallets|dress|shirts?|t-?shirts?|tee\s*shirts?|tees?|saree|groceries|grocery|tea|coffee|fruit|fruits|snack|snacks|cookie|cookies|biscuit|biscuits|chips|nuts|sweets|candy|food|drink|drinks|beverage|beverages|gift\s+(?:box|set|basket|pack)|birthday\s+(?:cake|gift)|anniversary\s+gift)\b/i.test(
     message
   );
 }
@@ -2161,7 +2356,7 @@ function clearlyAsksForProductSearch(
   if (isVagueGiftIdeaRequest(normalized)) return false;
 
   const explicitCommerceRequest =
-    /\b(?:find|show|search|browse|shop|buy|purchase|look for|looking for|get me|give me|options? for|choices? for|shortlist)\b/i.test(
+    /\b(?:find|show\s*me|show|search|browse|shop|buy|purchase|look for|looking for|get me|give me|options? for|choices? for|shortlist)\b/i.test(
       normalized
     );
   const recommendationRequest =
@@ -2181,8 +2376,18 @@ function clearlyAsksForProductSearch(
       normalized
     ) && hasSearchableProductPhrase(normalized);
   const previousProductRequest = recentSearchableUserContext(history);
+  const previousConcreteProductRequest = recentConcreteProductContext(history);
   const moreFromPreviousProductRequest =
     isMoreProductFollowUp(normalized) && Boolean(previousProductRequest);
+  const pronounCardsFromPreviousProductRequest =
+    isPronounProductCardFollowUp(normalized) &&
+    Boolean(previousConcreteProductRequest || previousProductRequest);
+  const sendBunchFromPreviousProductRequest =
+    isSendBunchFollowUp(normalized) &&
+    Boolean(previousConcreteProductRequest || previousProductRequest);
+  const budgetOnlyFromPreviousProductRequest =
+    isBudgetOnlyFollowUp(normalized) &&
+    Boolean(previousConcreteProductRequest || previousProductRequest);
   const moreWithConcreteProduct =
     /\b(?:more|another|others?|other options?|alternatives?|similar|different|cheaper|premium)\b/i.test(
       normalized
@@ -2208,6 +2413,9 @@ function clearlyAsksForProductSearch(
     genericNeed ||
     concreteCategoryWithBudget ||
     budgetedShoppingRequest ||
+    pronounCardsFromPreviousProductRequest ||
+    sendBunchFromPreviousProductRequest ||
+    budgetOnlyFromPreviousProductRequest ||
     shortConcreteFollowUp ||
     confirmsSuggestedSearch ||
     moreFromPreviousProductRequest ||
@@ -2537,6 +2745,20 @@ function strictRequestAliases(message: string) {
       "headphones",
       "headset",
       "wireless",
+    ]);
+  }
+
+  if (/\b(?:t-?shirts?|tee\s*shirts?|tees?|shirts?)\b/i.test(normalized)) {
+    aliasGroups.push([
+      "shirt",
+      "shirts",
+      "tshirt",
+      "tshirts",
+      "t-shirt",
+      "t-shirts",
+      "tee",
+      "tees",
+      "cotton",
     ]);
   }
 

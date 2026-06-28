@@ -17,6 +17,7 @@ import {
   Shirt,
   ShoppingBasket,
   Send,
+  Sparkles,
 } from "lucide-react";
 import { BrandLogo } from "@/components/brand/BrandLogo";
 
@@ -154,7 +155,7 @@ export function WelcomeScreen({
 
         <div className="shopping-composer mx-auto mt-8 flex w-full max-w-3xl gap-2 rounded-full border p-2">
           <div className="shopping-composer-icon flex items-center pl-1">
-            <BrandLogo size={36} />
+            <Sparkles size={20} />
           </div>
           <input
             value={input}

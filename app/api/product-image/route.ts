@@ -1,3 +1,8 @@
+import {
+  extractKaprukaProductImages,
+  normalizeKaprukaImageUrl,
+} from "@/lib/kapruka-images";
+
 const ALLOWED_IMAGE_HOSTS = new Set([
   "static2.kapruka.com",
   "partnercentral.kapruka.com",
@@ -5,7 +10,25 @@ const ALLOWED_IMAGE_HOSTS = new Set([
   "kapruka.com",
 ]);
 
-function parseAllowedUrl(value: string | null) {
+function parseAllowedImageUrl(value: string | null) {
+  const normalized = normalizeKaprukaImageUrl(value);
+
+  if (!normalized) return null;
+
+  try {
+    const url = new URL(normalized);
+
+    if (url.protocol !== "https:" || !ALLOWED_IMAGE_HOSTS.has(url.hostname)) {
+      return null;
+    }
+
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+function parseAllowedProductUrl(value: string | null) {
   if (!value) return null;
 
   try {
@@ -21,21 +44,6 @@ function parseAllowedUrl(value: string | null) {
   }
 }
 
-function extractProductImage(html: string) {
-  const match =
-    html.match(
-      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
-    ) ||
-    html.match(
-      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i
-    ) ||
-    html.match(
-      /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i
-    );
-
-  return parseAllowedUrl(match?.[1] || null);
-}
-
 async function fetchImage(url: URL) {
   try {
     const response = await fetch(url, {
@@ -47,7 +55,7 @@ async function fetchImage(url: URL) {
       signal: AbortSignal.timeout(15_000),
     });
     const contentType = response.headers.get("content-type") || "";
-    const finalUrl = parseAllowedUrl(response.url);
+    const finalUrl = parseAllowedImageUrl(response.url);
 
     if (!response.ok || !contentType.startsWith("image/") || !finalUrl) {
       return null;
@@ -67,8 +75,8 @@ async function fetchImage(url: URL) {
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
-  const imageUrl = parseAllowedUrl(requestUrl.searchParams.get("src"));
-  const productUrl = parseAllowedUrl(requestUrl.searchParams.get("product"));
+  const imageUrl = parseAllowedImageUrl(requestUrl.searchParams.get("src"));
+  const productUrl = parseAllowedProductUrl(requestUrl.searchParams.get("product"));
 
   if (!imageUrl && !productUrl) {
     return new Response("Invalid Kapruka image request.", { status: 400 });
@@ -91,12 +99,13 @@ export async function GET(request: Request) {
       });
 
       if (productResponse.ok) {
-        const recoveredImageUrl = extractProductImage(
-          await productResponse.text()
+        const recoveredImageUrls = extractKaprukaProductImages(
+          await productResponse.text(),
+          productUrl
         );
 
-        if (recoveredImageUrl) {
-          const recoveredImage = await fetchImage(recoveredImageUrl);
+        for (const recoveredImageUrl of recoveredImageUrls) {
+          const recoveredImage = await fetchImage(new URL(recoveredImageUrl));
 
           if (recoveredImage) return recoveredImage;
         }

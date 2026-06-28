@@ -78,7 +78,7 @@ function shouldStreamFastConversation(payload: unknown) {
 
   const normalized = message.toLowerCase();
   const commerceSignal =
-    /\b(?:buy|shop|shopping|find|show|search|browse|recommend|suggest|need|want|looking for|look for|after|product|item|price|budget|under|below|less than|up to|lkr|rs\.?|delivery|deliver|shipping|stock|available|cart|checkout|payment|order|tracking|track|cake|flowers?|gift|hamper|watch|phone|laptop|headphones?|earbuds?|gadget|gadgets|electronics?|device|devices|accessories|speaker|speakers|charger|chargers|powerbank|powerbanks|grocery|groceries|fashion|dress|toy|supplement|vitamin|snacks?|cookies?|biscuits?|chips?|nuts?|chocolates?|sweets?|candy|food|drinks?|beverages?)\b/i;
+    /\b(?:buy|shop|shopping|find|show\s*me|show|search|browse|recommend|suggest|need|want|looking for|look for|after|product|item|price|budget|under|below|less than|up to|lkr|rs\.?|delivery|deliver|shipping|stock|available|cart|checkout|payment|order|tracking|track|cake|flowers?|gift|hamper|watch|phone|laptop|headphones?|earbuds?|gadget|gadgets|electronics?|device|devices|accessories|speaker|speakers|charger|chargers|powerbank|powerbanks|grocery|groceries|fashion|dress|shirts?|t-?shirts?|tees?|toy|supplement|vitamin|snacks?|cookies?|biscuits?|chips?|nuts?|chocolates?|sweets?|candy|food|drinks?|beverages?)\b/i;
   const asksWhatIsAvailable =
     /\b(?:do+\s*y?ou|you)\s+have\b|\bwhat\b[\s\S]{0,40}\bhave\b/i.test(
       normalized
@@ -98,17 +98,29 @@ function shouldStreamFastConversation(payload: unknown) {
   }
 
   const history = parseHistory(Reflect.get(payload, "history"));
+  const hasRecentShoppingContext = history.some(
+    (item) =>
+      commerceSignal.test(item.content) ||
+      /\b(?:look up|options?|search Kapruka|want me to search|pull the latest|latest options|find something|find out|give me a sec|running the search|found a few|what kind|what style|what vibe|casual basics|graphic prints|sportier)\b/i.test(
+        item.content
+      )
+  );
+  const isShortShoppingRefinement =
+    normalized.trim().split(/\s+/).length <= 4 &&
+    /\b(?:casual|basic|basics|plain|graphic|print|prints|sporty|sportier|formal|office|cotton|crew|crewneck|crew-neck|white|black|grey|gray|navy|bunch|batch|cards?|them|those|show\s*me|showthem|show them|yeah\s*show\s*me|yes\s*show\s*me|send\s+(?:a\s+)?bunch)\b/i.test(
+      normalized
+    ) &&
+    hasRecentShoppingContext;
+
+  if (isShortShoppingRefinement) {
+    return false;
+  }
+
   const isCommerceFollowUp =
-    /^(?:\?+|more|another|others?|cheaper|similar|different|the first one|the second one|yes(?: please| pls| plz)?|yeah(?: please| pls| plz)?|yep(?: please| pls| plz)?|sure(?: please| pls| plz)?|okay|ok|please|pls|plz|do it|go ahead|please do|no)$/i.test(
+    /^(?:\?+|more|another|others?|cheaper|similar|different|the first one|the second one|yes(?: please| pls| plz|\s*show\s*me)?|yeah(?: please| pls| plz|\s*show\s*me)?|yep(?: please| pls| plz|\s*show\s*me)?|sure(?: please| pls| plz|\s*show\s*me)?|okay|ok|please|pls|plz|show\s*me|show them|show me (?:the )?cards(?: of them)?|send them|send (?:a )?bunch|no just send (?:a )?bunch|do it|go ahead|please do|no)$/i.test(
       normalized.trim()
     ) &&
-    history.some(
-      (item) =>
-        commerceSignal.test(item.content) ||
-        /\b(?:look up|options?|search Kapruka|want me to search|pull the latest|latest options|find something|find out|give me a sec|running the search|found a few)\b/i.test(
-          item.content
-        )
-    );
+    hasRecentShoppingContext;
 
   return !isCommerceFollowUp;
 }

@@ -3,15 +3,9 @@ import type {
   ProductQuestion,
   ProductSpecification,
 } from "@/types/product";
+import { extractKaprukaProductImages } from "@/lib/kapruka-images";
 
 const ALLOWED_PRODUCT_HOSTS = new Set([
-  "www.kapruka.com",
-  "kapruka.com",
-]);
-
-const ALLOWED_IMAGE_HOSTS = new Set([
-  "static2.kapruka.com",
-  "partnercentral.kapruka.com",
   "www.kapruka.com",
   "kapruka.com",
 ]);
@@ -83,94 +77,11 @@ function textFromHtml(value: string) {
     .trim();
 }
 
-function normalizeImageUrl(value: string) {
-  const decoded = decodeHtml(value.trim());
-
-  try {
-    const url = new URL(
-      decoded.startsWith("//") ? `https:${decoded}` : decoded,
-      "https://www.kapruka.com"
-    );
-
-    if (
-      url.protocol !== "https:" ||
-      !ALLOWED_IMAGE_HOSTS.has(url.hostname)
-    ) {
-      return null;
-    }
-
-    if (/(?:youtube|play[_-]?button|logo|sprite|placeholder|icon)/i.test(url.pathname)) {
-      return null;
-    }
-
-    url.searchParams.delete("v");
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
 function uniqueClean(values: string[], limit: number) {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].slice(
     0,
     limit
   );
-}
-
-function uniqueImages(values: string[]) {
-  const unique = new Map<string, string>();
-
-  for (const value of values) {
-    try {
-      const url = new URL(value);
-      const filename = url.pathname.split("/").pop()?.toLowerCase();
-      const key = filename || url.toString();
-
-      if (!unique.has(key)) unique.set(key, value);
-    } catch {
-      if (!unique.has(value)) unique.set(value, value);
-    }
-  }
-
-  return [...unique.values()].slice(0, 12);
-}
-
-function comparableImageToken(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function productImageTokens(productUrl: URL) {
-  const rawProductId = productUrl.pathname.match(/\/kid\/([^/?#]+)/i)?.[1] || "";
-  const normalizedProductId = comparableImageToken(rawProductId);
-  const tokens = new Set<string>();
-
-  if (normalizedProductId.length >= 8) {
-    tokens.add(normalizedProductId);
-    tokens.add(normalizedProductId.replace(/^efpc/, ""));
-    tokens.add(normalizedProductId.replace(/pod(\d+)p?$/i, "p$1"));
-    tokens.add(
-      normalizedProductId.replace(/^efpc/, "").replace(/pod(\d+)p?$/i, "p$1")
-    );
-  }
-
-  const coreMatch = normalizedProductId.match(/[a-z]+0v\d+(?:pod)?\d+p?/i);
-
-  if (coreMatch?.[0]) {
-    const core = coreMatch[0];
-
-    tokens.add(core);
-    tokens.add(core.replace(/pod(\d+)p?$/i, "p$1"));
-  }
-
-  return [...tokens].filter((token) => token.length >= 8);
-}
-
-function imageBelongsToProduct(imageUrl: string, productTokens: string[]) {
-  if (productTokens.length === 0) return true;
-
-  const imageToken = comparableImageToken(imageUrl);
-
-  return productTokens.some((token) => imageToken.includes(token));
 }
 
 function extractName(html: string) {
@@ -185,45 +96,7 @@ function extractName(html: string) {
 }
 
 function extractImages(html: string, productUrl: URL) {
-  const productTokens = productImageTokens(productUrl);
-  const galleryStart = html.search(/id=["']sync1["']/i);
-  const galleryEnd =
-    galleryStart >= 0
-      ? html.slice(galleryStart).search(/id=["']sync2["']/i)
-      : -1;
-  const gallery =
-    galleryStart >= 0
-      ? html.slice(
-          galleryStart,
-          galleryEnd > 0 ? galleryStart + galleryEnd : galleryStart + 30_000
-        )
-      : html.slice(0, 80_000);
-  const urls: string[] = [];
-
-  for (const match of gallery.matchAll(
-    /(?:src|data-src)=["']([^"']+\.(?:avif|gif|jpe?g|png|webp)(?:\?[^"']*)?)["']/gi
-  )) {
-    const url = normalizeImageUrl(match[1]);
-    if (url && imageBelongsToProduct(url, productTokens)) urls.push(url);
-  }
-
-  const ogImage =
-    html.match(
-      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
-    ) ||
-    html.match(
-      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i
-    );
-  const normalizedOgImage = normalizeImageUrl(ogImage?.[1] || "");
-
-  if (
-    normalizedOgImage &&
-    imageBelongsToProduct(normalizedOgImage, productTokens)
-  ) {
-    urls.unshift(normalizedOgImage);
-  }
-
-  return uniqueImages(urls);
+  return extractKaprukaProductImages(html, productUrl);
 }
 
 function extractDetailsRegion(html: string) {

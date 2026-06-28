@@ -14,6 +14,7 @@ import {
   Moon,
   Send,
   ShoppingCart,
+  Sparkles,
   Sun,
   Trash2,
   X,
@@ -550,11 +551,6 @@ export default function Home() {
     }, 0);
 
     return () => window.clearTimeout(timeout);
-  }, []);
-
-  useEffect(() => {
-    window.localStorage.removeItem(agentMemoryKey);
-    window.localStorage.removeItem(agentRunsKey);
   }, []);
 
   useEffect(() => {
@@ -1212,9 +1208,15 @@ export default function Home() {
             <div className="flex min-w-0 items-center gap-3 pl-10 sm:pl-11">
               {!isWelcome && (
                 <>
-                  <div className="shrink-0">
+                  <button
+                    type="button"
+                    onClick={startNewChat}
+                    aria-label="Go to welcome page"
+                    title="Go to welcome page"
+                    className="shrink-0 rounded-2xl transition hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-300 focus:ring-offset-2 focus:ring-offset-slate-950 active:scale-95"
+                  >
                     <BrandLogo size={64} priority />
-                  </div>
+                  </button>
 
                   <div className="min-w-0">
                     <h1 className="text-xl font-bold sm:text-2xl">
@@ -1437,7 +1439,7 @@ export default function Home() {
               }`}
             >
               <div className="shopping-composer-icon flex items-center pl-1">
-                <BrandLogo size={34} />
+                <Sparkles size={19} />
               </div>
 
               <input
