@@ -407,6 +407,16 @@ function pickNumber(obj: AnyRecord, keys: string[]) {
   return null;
 }
 
+function isImplausiblySmallLivePrice(
+  livePrice: number | null,
+  catalogPrice: number | null
+) {
+  if (livePrice === null || catalogPrice === null) return false;
+  if (livePrice >= catalogPrice) return false;
+
+  return catalogPrice >= 1000 && livePrice < catalogPrice * 0.05;
+}
+
 function pickBoolean(obj: AnyRecord, keys: string[]) {
   for (const key of keys) {
     const value = obj[key];
@@ -2042,7 +2052,12 @@ async function enrichProductsWithMetadata(products: ProductLike[]) {
         typeof product.price === "number" && product.price > 0
           ? product.price
           : null;
-      const currentPrice = livePrice ?? catalogPrice;
+      const currentPrice = isImplausiblySmallLivePrice(
+        livePrice,
+        catalogPrice
+      )
+        ? catalogPrice
+        : livePrice ?? catalogPrice;
       const compareAtCandidates = [
         metadata.compareAtPrice,
         product.compareAtPrice,
