@@ -301,7 +301,7 @@ export function DeliveryPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby="delivery-panel-title"
-        className="relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
+        className="relative flex h-full w-full max-w-lg flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
       >
         <header className="flex items-start justify-between border-b border-white/10 px-6 py-6">
           <div>
@@ -449,7 +449,7 @@ export function DeliveryPanel({
                 ) : null}
               </div>
 
-              <div className="rounded-3xl border border-white/10 bg-white/[0.045] p-4">
+              <div className="mr-auto max-w-md rounded-2xl border border-white/10 bg-white/[0.045] p-3.5">
                 <div className="flex items-center justify-between">
                   <button
                     type="button"
@@ -473,7 +473,7 @@ export function DeliveryPanel({
                   </button>
                 </div>
 
-                <div className="mt-4 grid grid-cols-7 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <div className="mt-3 grid grid-cols-7 text-center text-[10px] font-semibold uppercase tracking-wide text-slate-500">
                   {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
                     (day) => (
                       <span key={day} className="py-1">
@@ -486,7 +486,7 @@ export function DeliveryPanel({
                 <div
                   role="grid"
                   aria-label={`Choose a delivery date in ${monthLabel}`}
-                  className="mt-1 grid grid-cols-7 gap-1"
+                  className="mt-1 grid grid-cols-7 justify-items-center gap-1"
                 >
                   {calendarDays.map((date) => {
                     const value = toDateValue(date);
@@ -507,7 +507,7 @@ export function DeliveryPanel({
                         aria-label={formatDate(value)}
                         disabled={!canSelectDate}
                         onClick={() => selectDeliveryDate(date)}
-                        className={`relative flex aspect-square items-center justify-center rounded-xl text-sm font-medium transition ${
+                        className={`relative flex h-10 w-10 items-center justify-center rounded-xl text-sm font-medium transition ${
                           isSelected
                             ? "bg-purple-100 text-slate-950 shadow-lg shadow-purple-300/30"
                             : isPast || !isCurrentMonth

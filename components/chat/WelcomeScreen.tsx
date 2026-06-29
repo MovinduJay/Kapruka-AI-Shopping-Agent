@@ -136,24 +136,24 @@ export function WelcomeScreen({
   }
 
   return (
-    <div className="flex flex-1 items-center overflow-y-auto px-4 pb-12 pt-7 font-sans sm:px-6 sm:pb-16">
+    <div className="flex flex-1 items-center overflow-y-auto px-4 pb-7 pt-5 font-sans sm:px-6 sm:pb-10 sm:pt-6">
       <div className="mx-auto w-full max-w-6xl text-center">
-        <div className="mx-auto flex h-44 w-44 items-center justify-center overflow-visible drop-shadow-[0_24px_42px_rgba(64,41,112,0.22)] sm:h-56 sm:w-56">
+        <div className="mx-auto flex h-40 w-40 items-center justify-center overflow-visible drop-shadow-[0_22px_38px_rgba(64,41,112,0.22)] sm:h-[202px] sm:w-[202px]">
           <BrandLogo
-            size={188}
+            size={170}
             priority
-            className="translate-y-2 sm:h-[204px] sm:w-[204px]"
+            className="translate-y-1.5 sm:h-[184px] sm:w-[184px]"
           />
         </div>
 
-        <h2 className="mt-1 text-4xl font-semibold tracking-[-0.04em] text-white sm:text-6xl">
+        <h2 className="mt-0 text-[2.15rem] font-semibold leading-tight text-white sm:text-[3.35rem]">
           Shop across Kapruka.
         </h2>
-        <p className="mx-auto mt-3 max-w-2xl text-xl tracking-[-0.02em] text-slate-300 sm:text-3xl">
+        <p className="mx-auto mt-2 max-w-2xl text-lg text-slate-300 sm:text-[1.7rem] sm:leading-tight">
           Hi, what do you need today?
         </p>
 
-        <div className="shopping-composer mx-auto mt-8 flex w-full max-w-3xl gap-2 rounded-full border p-2">
+        <div className="shopping-composer mx-auto mt-7 flex w-full max-w-[43rem] gap-2 rounded-full border p-2">
           <div className="shopping-composer-icon flex items-center pl-1">
             <Sparkles size={20} />
           </div>
@@ -162,25 +162,25 @@ export function WelcomeScreen({
             onChange={(event) => onInputChange(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="What are you shopping for?"
-            className="shopping-composer-input min-w-0 flex-1 bg-transparent px-2 py-2.5 text-base outline-none sm:text-lg"
+            className="shopping-composer-input min-w-0 flex-1 bg-transparent px-2 py-2 text-base outline-none sm:text-[1.05rem]"
           />
           <button
             type="button"
             onClick={() => onSubmit()}
             disabled={!input.trim()}
             aria-label="Start shopping"
-            className="shopping-composer-send flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
+            className="shopping-composer-send flex h-10 w-10 shrink-0 items-center justify-center rounded-full disabled:opacity-40 sm:h-11 sm:w-11"
           >
             <Send size={18} />
           </button>
         </div>
 
-        <div className="mx-auto mt-7 flex max-w-6xl items-center gap-3 pb-10 sm:gap-4 sm:pb-14">
+        <div className="mx-auto mt-5 flex max-w-6xl items-center gap-3 pb-6 sm:mt-6 sm:gap-4 sm:pb-8">
           <button
             type="button"
             onClick={() => scrollCategories("left")}
             aria-label="Show previous categories"
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white text-blue-600 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.45)] transition hover:border-blue-300 hover:bg-slate-50"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white text-blue-600 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.45)] transition hover:border-blue-300 hover:bg-slate-50 sm:h-12 sm:w-12"
           >
             <ChevronLeft size={25} />
           </button>
@@ -191,7 +191,7 @@ export function WelcomeScreen({
 
             <div
               ref={carouselRef}
-              className="flex snap-x snap-mandatory gap-5 overflow-x-auto px-1 pb-9 pt-3 text-left scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              className="flex snap-x snap-mandatory gap-4 overflow-x-auto px-1 pb-6 pt-2 text-left scroll-smooth [scrollbar-width:none] sm:gap-5 sm:pb-7 [&::-webkit-scrollbar]:hidden"
             >
             {suggestions.map((suggestion) => {
               const Icon = suggestion.icon;
@@ -212,9 +212,9 @@ export function WelcomeScreen({
                   key={suggestion.label}
                   type="button"
                   onClick={() => onSubmit(suggestion.prompt)}
-                  className="aspect-square w-[82%] shrink-0 snap-start cursor-pointer rounded-[30px] border border-white/10 bg-white/[0.06] p-5 text-left shadow-lg transition duration-200 hover:border-purple-400/70 hover:bg-white/10 hover:shadow-[0_0_0_3px_rgba(64,41,112,0.16),0_18px_42px_-24px_rgba(64,41,112,0.55)] sm:w-[calc((100%_-_1.25rem)/2)] lg:w-[calc((100%_-_2.5rem)/3)] 2xl:w-[calc((100%_-_3.75rem)/4)]"
+                  className="aspect-square w-[82%] shrink-0 snap-start cursor-pointer rounded-[26px] border border-white/10 bg-white/[0.06] p-4 text-left shadow-lg transition duration-200 hover:border-purple-400/70 hover:bg-white/10 hover:shadow-[0_0_0_3px_rgba(64,41,112,0.16),0_18px_42px_-24px_rgba(64,41,112,0.55)] sm:w-[calc((100%_-_1.25rem)/2)] lg:w-[calc((100%_-_2.5rem)/3)] 2xl:w-[calc((100%_-_3.75rem)/4)]"
                 >
-                  <div className="relative flex h-[62%] items-center justify-center overflow-hidden rounded-[22px] text-purple-300">
+                  <div className="relative flex h-[60%] items-center justify-center overflow-hidden rounded-[20px] text-purple-300">
                     {imageUrl ? (
                       <Image
                         src={imageUrl}
@@ -235,10 +235,10 @@ export function WelcomeScreen({
                       <Icon size={38} strokeWidth={1.5} />
                     )}
                   </div>
-                  <p className="mt-3 text-xs font-semibold uppercase tracking-[0.16em] text-purple-300">
+                  <p className="mt-2.5 text-xs font-semibold uppercase tracking-[0.14em] text-purple-300">
                     {suggestion.label}
                   </p>
-                  <p className="mt-2 line-clamp-2 text-sm leading-5 text-slate-200">
+                  <p className="mt-1.5 line-clamp-2 text-sm leading-5 text-slate-200">
                     {suggestion.prompt}
                   </p>
                 </button>
@@ -251,7 +251,7 @@ export function WelcomeScreen({
             type="button"
             onClick={() => scrollCategories("right")}
             aria-label="Show more categories"
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white text-blue-600 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.45)] transition hover:border-blue-300 hover:bg-slate-50"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white text-blue-600 shadow-[0_8px_24px_-12px_rgba(15,23,42,0.45)] transition hover:border-blue-300 hover:bg-slate-50 sm:h-12 sm:w-12"
           >
             <ChevronRight size={25} />
           </button>

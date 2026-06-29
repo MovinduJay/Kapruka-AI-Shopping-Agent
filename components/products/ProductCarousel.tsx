@@ -10,7 +10,7 @@ type Props = {
   cartProductIds: string[];
   onAddToCart: (product: ProductCardType) => void;
   onViewDetails: (product: ProductCardType) => void;
-  onFollowUp: (message: string) => void;
+  onFollowUp: (message: string, requestMessage?: string) => void;
   searchContext: string;
   excludedProductNames?: string[];
   disabled?: boolean;
@@ -31,6 +31,10 @@ function searchSubjectFromContext(context: string) {
     .replace(/\s+/g, " ")
     .replace(/^[,.:;\s-]+|[,.:;\s-]+$/g, "")
     .trim();
+
+  if (/^(?:nothing much|nothing|none|no|ok|okay|yes|yeah|sure)$/i.test(subject)) {
+    return "similar products";
+  }
 
   return subject || "similar products";
 }
@@ -73,7 +77,8 @@ export function ProductCarousel({
       message: `Show me the best-value options for ${searchSubject}`,
     },
   ];
-  const moreMessage = `Show me 8 more ${searchSubject}. Exclude these products: ${[
+  const moreDisplayMessage = "Show me more options";
+  const moreRequestMessage = `${moreDisplayMessage}. Exclude these products: ${[
     ...new Set([...excludedProductNames, ...products.map((product) => product.name)]),
   ]
     .join("; ")}`;
@@ -119,12 +124,12 @@ export function ProductCarousel({
 
       <div
         ref={carouselRef}
-        className="flex snap-x snap-mandatory items-stretch gap-4 overflow-x-auto scroll-smooth py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex snap-x snap-mandatory items-stretch gap-2 overflow-x-auto scroll-smooth py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {products.map((product) => (
           <div
             key={`${product.id}:${product.imageUrl || product.productUrl || "no-image"}`}
-            className="w-[82%] shrink-0 snap-start sm:w-[calc((100%_-_1rem)/2)] lg:w-[calc((100%_-_2rem)/3)] xl:w-[calc((100%_-_3rem)/4)]"
+            className="w-[82%] shrink-0 snap-start sm:w-[calc((100%_-_0.5rem)/2)] lg:w-[calc((100%_-_1rem)/3)] xl:w-[calc((100%_-_1.5rem)/4)]"
           >
             <ProductCard
               product={product}
@@ -138,9 +143,9 @@ export function ProductCarousel({
         {products.length >= 8 && (
           <button
             type="button"
-            onClick={() => onFollowUp(moreMessage)}
+            onClick={() => onFollowUp(moreDisplayMessage, moreRequestMessage)}
             disabled={disabled}
-            className="flex min-h-[360px] w-[82%] shrink-0 snap-start flex-col items-center justify-center rounded-[30px] border border-dashed border-purple-400/45 bg-purple-500/[0.07] p-6 text-center text-purple-200 transition hover:border-purple-300 hover:bg-purple-500/15 disabled:cursor-not-allowed disabled:opacity-45 sm:w-[calc((100%_-_1rem)/2)] lg:w-[calc((100%_-_2rem)/3)] xl:w-[calc((100%_-_3rem)/4)]"
+            className="flex min-h-[360px] w-[82%] shrink-0 snap-start flex-col items-center justify-center rounded-[30px] border border-dashed border-purple-400/45 bg-purple-500/[0.07] p-6 text-center text-purple-200 transition hover:border-purple-300 hover:bg-purple-500/15 disabled:cursor-not-allowed disabled:opacity-45 sm:w-[calc((100%_-_0.5rem)/2)] lg:w-[calc((100%_-_1rem)/3)] xl:w-[calc((100%_-_1.5rem)/4)]"
           >
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-purple-500 text-white shadow-lg shadow-purple-950/25">
               <Plus size={24} strokeWidth={2.5} />

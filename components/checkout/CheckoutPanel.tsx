@@ -324,7 +324,7 @@ export function CheckoutPanel({
         role="dialog"
         aria-modal="true"
         aria-labelledby="checkout-title"
-        className="relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
+        className="relative flex h-full w-full max-w-lg flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
       >
         <header className="flex items-start justify-between border-b border-white/10 px-6 py-6">
           <div>

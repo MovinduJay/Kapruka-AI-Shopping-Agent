@@ -210,7 +210,7 @@ function ProductDetailContent({
           <div className="grid min-h-full lg:grid-cols-[minmax(0,1.05fr)_minmax(380px,0.95fr)]">
             <div className="product-detail-gallery border-b border-white/10 bg-gradient-to-br from-slate-900 via-slate-950 to-purple-950/30 p-4 sm:p-7 lg:sticky lg:top-0 lg:h-[calc(100vh-7rem)] lg:max-h-[820px] lg:border-b-0 lg:border-r">
               <div className="mx-auto flex h-full max-w-2xl flex-col">
-                <div className="product-detail-image-stage relative flex min-h-[320px] flex-1 items-center justify-center overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.025] p-4 shadow-[0_30px_90px_-45px_rgba(64,41,112,0.35)] sm:min-h-[460px]">
+                <div className="product-detail-image-stage relative flex min-h-[320px] flex-1 items-center justify-center overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.025] shadow-[0_30px_90px_-45px_rgba(64,41,112,0.35)] sm:min-h-[460px]">
                   {currentImage ? (
                     // Kapruka images are served through the local allow-listed proxy.
                     // eslint-disable-next-line @next/next/no-img-element
@@ -222,7 +222,7 @@ function ProductDetailContent({
                           new Set(current).add(currentImage)
                         )
                       }
-                      className="h-full max-h-[620px] w-full object-contain"
+                      className="absolute inset-0 h-full w-full object-cover"
                     />
                   ) : (
                     <div className="flex flex-col items-center gap-3 text-slate-400">
@@ -359,9 +359,9 @@ function ProductDetailContent({
                     type="button"
                     onClick={() => onAddToCart(product)}
                     disabled={isOutOfStock}
-                    className="flex min-h-13 flex-1 items-center justify-center gap-2 rounded-2xl bg-purple-500 px-5 py-3.5 text-sm font-bold text-white transition hover:bg-purple-400 disabled:bg-white/[0.08] disabled:text-slate-500"
+                    className="flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-purple-500 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-purple-400 disabled:bg-white/[0.08] disabled:text-slate-500"
                   >
-                    <ShoppingCart size={19} />
+                    <ShoppingCart size={17} />
                     {isInCart
                       ? "Add another"
                       : isOutOfStock
@@ -373,9 +373,9 @@ function ProductDetailContent({
                       href={product.productUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex min-h-13 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.05] px-5 py-3.5 text-sm font-semibold text-white transition hover:border-purple-400/40 hover:bg-white/10"
+                      className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-2.5 text-sm font-semibold text-white transition hover:border-purple-400/40 hover:bg-white/10"
                     >
-                      <ExternalLink size={18} />
+                      <ExternalLink size={16} />
                       Open on Kapruka
                     </a>
                   )}

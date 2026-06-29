@@ -876,8 +876,9 @@ export default function Home() {
     setCheckoutPanelOpen(target === "checkout");
   }
 
-  async function sendMessage(message?: string) {
+  async function sendMessage(message?: string, requestMessage?: string) {
     const userMessage = (message ?? input).trim();
+    const outboundMessage = (requestMessage ?? userMessage).trim();
 
     if (!userMessage || loading || sendingRef.current) return;
 
@@ -933,7 +934,7 @@ export default function Home() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          message: userMessage,
+          message: outboundMessage,
           location: sharedLocation,
           history: requestHistory,
           memory,
@@ -1304,7 +1305,7 @@ export default function Home() {
           className="flex-1 overflow-y-auto"
           onScroll={(event) => updateComposerGlass(event.currentTarget)}
         >
-          <div className="mx-auto w-full max-w-6xl px-4 pb-40 pt-6 sm:px-6 sm:pb-44">
+          <div className="mx-auto w-full max-w-5xl px-4 pb-40 pt-6 sm:px-6 sm:pb-44">
             {messages.map((message, index) => {
               const previousMessage = messages[index - 1];
               const nextMessage = messages[index + 1];
@@ -1348,7 +1349,7 @@ export default function Home() {
                   className={
                     hasVisibleProducts
                       ? "group/message w-full min-w-0"
-                      : "group/message max-w-5xl"
+                      : "group/message max-w-3xl"
                   }
                 >
                   {message.role === "assistant" ? (
@@ -1587,7 +1588,7 @@ export default function Home() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="cart-title"
-            className="cart-drawer relative flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
+            className="cart-drawer relative flex h-full w-full max-w-md flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
           >
             <div className="flex items-center justify-between border-b border-white/10 p-6">
               <div className="flex items-center gap-3">
