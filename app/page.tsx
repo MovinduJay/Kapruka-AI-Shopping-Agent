@@ -364,25 +364,54 @@ function saveShoppingChats(chats: SavedShoppingChat[]) {
   window.localStorage.setItem(savedChatsKey, JSON.stringify(chats.slice(0, 20)));
 }
 
+function mergeSavedChats(
+  primary: SavedShoppingChat[],
+  fallback: SavedShoppingChat[]
+) {
+  const chatsById = new Map<string, SavedShoppingChat>();
+
+  for (const chat of [...fallback, ...primary]) {
+    const existing = chatsById.get(chat.id);
+
+    if (!existing || chat.updatedAt >= existing.updatedAt) {
+      chatsById.set(chat.id, chat);
+    }
+  }
+
+  return Array.from(chatsById.values())
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 20);
+}
+
+function postSavedChatSnapshot(snapshot: SavedShoppingChat) {
+  fetch("/api/saved-chats", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(snapshot),
+  }).catch(() => {
+    // Local storage is the source of immediate recovery when persistence fails.
+  });
+}
+
 function updateSavedChatSnapshot(
   chatId: string,
   snapshot: Omit<SavedShoppingChat, "id" | "updatedAt">
 ) {
   const saved = loadSavedChats();
-  const next = [
-    {
-      id: chatId,
-      updatedAt: Date.now(),
-      ...snapshot,
-    },
-    ...saved.filter((chat) => chat.id !== chatId),
-  ].slice(0, 20);
+  const nextSnapshot = {
+    id: chatId,
+    updatedAt: Date.now(),
+    ...snapshot,
+  };
+  const next = [nextSnapshot, ...saved.filter((chat) => chat.id !== chatId)].slice(
+    0,
+    20
+  );
 
   saveShoppingChats(next);
-  postObservabilityEvent("/api/saved-chats", {
-    id: chatId,
-    ...snapshot,
-  });
+  postSavedChatSnapshot(nextSnapshot);
   return next;
 }
 
@@ -785,7 +814,8 @@ export default function Home() {
 
   async function openSavedChatsDrawer() {
     setSavedChatsClosing(false);
-    setSavedChats(loadSavedChats());
+    const localChats = loadSavedChats();
+    setSavedChats(localChats);
     setSavedChatsOpen(true);
 
     try {
@@ -793,10 +823,8 @@ export default function Home() {
       const data = (await response.json()) as { chats?: SavedShoppingChat[] };
 
       if (response.ok && Array.isArray(data.chats)) {
-        const next = data.chats
-          .map(normalizeSavedShoppingChat)
-          .sort((a, b) => b.updatedAt - a.updatedAt)
-          .slice(0, 20);
+        const remoteChats = data.chats.map(normalizeSavedShoppingChat);
+        const next = mergeSavedChats(remoteChats, localChats);
         setSavedChats(next);
         saveShoppingChats(next);
       }
