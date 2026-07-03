@@ -334,7 +334,7 @@ export function CheckoutPanel({
             </div>
             <h2 id="checkout-title" className="text-2xl font-bold">
               {step === "pay"
-                ? "Demo checkout complete"
+                ? "Checkout link created"
                 : "Review checkout details"}
             </h2>
             <p className="mt-2 text-sm leading-6 text-slate-400">
@@ -802,7 +802,7 @@ export function CheckoutPanel({
               <div className="checkout-section-card overflow-hidden rounded-3xl border">
                 <div className="border-b border-white/10 p-5">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
-                    Demo receipt
+                    Payment summary
                   </p>
                   <div className="mt-2 flex items-start justify-between gap-4">
                     <div>
@@ -889,10 +889,10 @@ export function CheckoutPanel({
               </a>
 
               <p className="text-xs leading-5 text-slate-400">
-                This is the end of the demo flow. Do not enter card details.
-                This checkout reference is not a confirmed order number and
-                cannot be used for order tracking. Kapruka provides the actual
-                order number only after a real payment.
+                Do not enter card details unless you intend to pay. This
+                checkout reference is not a confirmed order number and cannot
+                be used for order tracking. Kapruka provides the actual order
+                number only after payment.
               </p>
             </div>
           )}

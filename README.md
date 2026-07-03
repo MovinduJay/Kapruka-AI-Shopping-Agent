@@ -9,8 +9,10 @@ agent generates a Kapruka guest-checkout payment link.
   a test credit card.
 - Generating the link does not confirm the order.
 - The returned checkout reference is not a trackable order number.
-- `kapruka_track_order` is relevant only after a real payment is completed and
-  Kapruka issues the actual order number.
+- For the challenge demo, `VPAY827982BA` is a Kapruka-provided test order number
+  that can be passed to `kapruka_track_order`.
+- Outside the demo test order, `kapruka_track_order` is relevant only after a
+  real payment is completed and Kapruka issues the actual order number.
 
 ## Getting Started
 

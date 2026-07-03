@@ -14,6 +14,7 @@ import {
   Flower2,
   House,
   Laptop,
+  PackageCheck,
   Shirt,
   ShoppingBasket,
   Send,
@@ -57,6 +58,12 @@ const suggestions = [
     label: "Home & living",
     prompt: "Show me useful home and kitchen products",
     icon: House,
+  },
+  {
+    key: "tracking",
+    label: "Order tracking",
+    prompt: "Track order VPAY827982BA",
+    icon: PackageCheck,
   },
 ];
 

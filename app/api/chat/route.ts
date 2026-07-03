@@ -131,10 +131,41 @@ type DeliveryCheckResult = {
   perishable_warning?: string | null;
 };
 
+type TrackOrderResult = {
+  order_number?: string;
+  status?: string;
+  status_display?: string;
+  order_date?: string;
+  delivery_date?: string;
+  shipped_date?: string | null;
+  amount?: string | { value?: string; currency?: string };
+  comments?: string | null;
+  recipient?: {
+    name?: string;
+    phone?: string;
+    address?: string;
+    city?: string;
+  };
+  progress?: Array<{
+    step?: string;
+    timestamp?: string;
+  }>;
+  live_tracking_available?: boolean;
+  has_delivery_video?: boolean;
+  has_delivery_photo?: boolean;
+  items?: Array<{
+    product_id?: string;
+    name?: string;
+    quantity?: number;
+    selling_price?: number;
+  }>;
+};
+
 const productMetadataCache = new Map<string, ProductPageMetadata | null>();
 const productMcpMetadataCache = new Map<string, ProductPageMetadata | null>();
 const PRODUCT_CARD_LIMIT = 8;
 const SEARCH_RESULT_LIMIT = 20;
+const TRACKING_EXAMPLE_ORDER_NUMBER = "VPAY827982BA";
 const MCP_URL =
   process.env.KAPRUKA_MCP_URL || "https://mcp.kapruka.com/mcp";
 const MCP_HEADERS = {
@@ -1344,6 +1375,32 @@ async function checkKaprukaDeliveryDirect(city: string, message: string) {
   };
 }
 
+async function trackKaprukaOrderDirect(orderNumber: string) {
+  const headers = await startDirectMcpSession();
+  const trackingResult = await callDirectMcpTool(
+    headers,
+    2,
+    "kapruka_track_order",
+    {
+      order_number: orderNumber,
+      response_format: "json",
+    }
+  );
+  const toolError = mcpToolErrorText(trackingResult);
+
+  if (toolError) {
+    throw new Error(toolError);
+  }
+
+  const tracking = parseMcpToolJson(trackingResult) as TrackOrderResult | null;
+
+  if (!tracking) {
+    throw new Error("Kapruka returned an empty tracking response.");
+  }
+
+  return tracking;
+}
+
 function extractToolOutputText(item: GroqOutputItem) {
   const possibleTexts: string[] = [];
 
@@ -2443,7 +2500,12 @@ function inferAgentIntent(message: string, history: ChatHistoryMessage[]) {
   const normalized = message.toLowerCase();
   const asksForProductSearch = clearlyAsksForProductSearch(message, history);
 
-  if (isOrderTrackingRequest(message)) return "order_tracking" as const;
+  if (
+    isOrderTrackingRequest(message) ||
+    (hasPlausibleOrderNumber(message) && recentlyAskedForOrderNumber(history))
+  ) {
+    return "order_tracking" as const;
+  }
   if (isVagueGiftIdeaRequest(message)) return "small_talk" as const;
   if (/\b(?:checkout|pay|payment|place order|confirm order)\b/i.test(normalized)) {
     return "checkout" as const;
@@ -2630,7 +2692,11 @@ function buildAgentSteps(
       return intent === "delivery" ? "running" : "pending";
     }
     if (id === "recommend") {
-      return productCount > 0 || intent === "small_talk" ? "completed" : "pending";
+      return productCount > 0 ||
+        intent === "small_talk" ||
+        intent === "order_tracking"
+        ? "completed"
+        : "pending";
     }
     if (id === "cart") return intent === "cart" ? "blocked" : "pending";
     if (id === "checkout") return intent === "checkout" ? "blocked" : "pending";
@@ -3303,8 +3369,8 @@ Shopping rules:
 - Never pretend checkout/payment/cart mutation happened unless the UI or checkout endpoint actually did it.
 - If important details are missing, ask one short follow-up question.
 - Do not create an order. Checkout will be handled later after explicit user confirmation.
-- For the demo, checkout ends when the guest-checkout payment link is generated. Never ask for card details, suggest test card data, or claim that payment was completed.
-- For order tracking, ask for the actual order number from the paid-order confirmation email or order-complete page, then use kapruka_track_order.
+- Checkout produces a guest-checkout payment link. Never ask for card details, suggest test card data, or claim that payment was completed before Kapruka confirms it.
+- For order tracking, ask for the actual order number from the paid-order confirmation email or order-complete page, then use kapruka_track_order. If the user needs a sample order number for testing, use ${TRACKING_EXAMPLE_ORDER_NUMBER}.
 - Never call kapruka_track_order with placeholders such as "unknown", "none", or an invented number. Call it only when the user has supplied a plausible order number.
 - The pre-payment checkout reference is not a trackable order number. If that is all the user has, explain the difference warmly and in one or two sentences.
 - When reporting tracking results, lead with the current status and next expected step. Do not unnecessarily repeat the recipient's full phone number or street address.
@@ -3759,6 +3825,49 @@ function fallbackDeliveryReply(
   return `Delivery to ${delivery.city} is not available for ${delivery.checkedDate}.${earliestText}`;
 }
 
+function latestTrackingStep(tracking: TrackOrderResult) {
+  const progress = tracking.progress || [];
+
+  return progress.length > 0 ? progress[progress.length - 1] : null;
+}
+
+function formatOrderAmount(amount: TrackOrderResult["amount"]) {
+  if (!amount) return null;
+  if (typeof amount === "string") return `LKR ${amount}`;
+
+  return `${amount.currency || "LKR"} ${amount.value || ""}`.trim();
+}
+
+function fallbackOrderTrackingReply(tracking: TrackOrderResult) {
+  const orderNumber = tracking.order_number || "that order";
+  const status = tracking.status_display || tracking.status || "Status found";
+  const latestStep = latestTrackingStep(tracking);
+  const city = tracking.recipient?.city ? ` to ${tracking.recipient.city}` : "";
+  const deliveryDate = tracking.delivery_date
+    ? ` Delivery date: ${tracking.delivery_date}.`
+    : "";
+  const amount = formatOrderAmount(tracking.amount);
+  const amountText = amount ? ` Amount: ${amount}.` : "";
+  const mediaText =
+    tracking.has_delivery_photo || tracking.has_delivery_video
+      ? " Delivery media is available on Kapruka."
+      : "";
+  const liveText = tracking.live_tracking_available
+    ? " Live tracking is available."
+    : "";
+  const latestText = latestStep?.step
+    ? ` Latest update: ${latestStep.step}${
+        latestStep.timestamp ? ` at ${latestStep.timestamp}` : ""
+      }.`
+    : "";
+  const commentText = tracking.comments ? ` ${tracking.comments}` : "";
+
+  return `Order ${orderNumber} is ${status}${city}.${latestText}${deliveryDate}${amountText}${commentText}${liveText}${mediaText}`.replace(
+    /\s+/g,
+    " "
+  );
+}
+
 function isPlainGreeting(message: string) {
   const normalized = message
     .toLowerCase()
@@ -3776,20 +3885,30 @@ function isPlainGreeting(message: string) {
 function isOrderTrackingRequest(message: string) {
   return /\b(?:track|tracking|status|where)\b[\s\S]{0,30}\b(?:order|delivery|package)\b|\b(?:order|delivery|package)\b[\s\S]{0,30}\b(?:track|tracking|status|where)\b/i.test(
     message
-  );
+  ) || /\b(?:track|tracking|status|where)\b[\s\S]{0,50}\b[A-Z]{2,}\d+[A-Z0-9]*\b/i.test(message);
 }
 
-function hasPlausibleOrderNumber(message: string) {
+function extractPlausibleOrderNumber(message: string) {
   return message
     .toUpperCase()
     .split(/[^A-Z0-9]+/)
-    .some(
+    .find(
       (token) =>
         token.length >= 8 &&
         token.length <= 24 &&
         /[A-Z]/.test(token) &&
         /\d/.test(token)
     );
+}
+
+function hasPlausibleOrderNumber(message: string) {
+  return Boolean(extractPlausibleOrderNumber(message));
+}
+
+function recentlyAskedForOrderNumber(history: ChatHistoryMessage[]) {
+  return /order number|latest status|pull up the latest status/i.test(
+    history.at(-1)?.content || ""
+  );
 }
 
 export async function POST(req: Request) {
@@ -3821,7 +3940,7 @@ export async function POST(req: Request) {
     if (isOrderTrackingRequest(message) && !hasPlausibleOrderNumber(message)) {
       return Response.json({
         reply:
-          "Yep, I can check it. Send me the actual order number from your confirmation email or order-complete page - not the checkout reference - and I'll pull up the latest status.",
+          `Yep, I can check it. Send me the actual order number from your confirmation email or order-complete page. You can also try ${TRACKING_EXAMPLE_ORDER_NUMBER}.`,
         products: [],
         debug: [],
       });
@@ -3865,9 +3984,63 @@ export async function POST(req: Request) {
     if (isOrderTrackingRequest(message) && !hasPlausibleOrderNumber(message)) {
       return Response.json({
         reply:
-          "Yep, I can check it. Send me the actual order number from your confirmation email or order-complete page - not the checkout reference - and I'll pull up the latest status.",
+          `Yep, I can check it. Send me the actual order number from your confirmation email or order-complete page. You can also try ${TRACKING_EXAMPLE_ORDER_NUMBER}.`,
         products: [],
         debug: [],
+      });
+    }
+
+    if (plan.intent === "order_tracking") {
+      const orderNumber = extractPlausibleOrderNumber(message);
+
+      if (!orderNumber) {
+        return Response.json({
+          reply:
+            `Yep, I can check it. Send me the actual order number from your confirmation email or order-complete page. You can also try ${TRACKING_EXAMPLE_ORDER_NUMBER}.`,
+          products: [],
+          debug: [],
+        });
+      }
+
+      const trackingStartedAt = Date.now();
+      const tracking = await trackKaprukaOrderDirect(orderNumber);
+      const tools: AgentToolCall[] = [
+        {
+          name: "kapruka_track_order",
+          status: "called",
+          latencyMs: Date.now() - trackingStartedAt,
+          arguments: {
+            order_number: orderNumber,
+            response_format: "json",
+          },
+        },
+      ];
+      const agentState = buildAgentState({
+        traceId,
+        message,
+        memory,
+        plan,
+        products: [],
+        ranking: [],
+        tools,
+        startedAt,
+      });
+      const displayReply = fallbackOrderTrackingReply(tracking);
+
+      await persistAgentRun({
+        sessionId: typeof sessionId === "string" ? sessionId : null,
+        userMessage: message,
+        assistantReply: displayReply,
+        agentState,
+        products: [],
+        latencyMs: Date.now() - startedAt,
+      });
+
+      return Response.json({
+        reply: displayReply,
+        products: [],
+        agentState,
+        debug: [{ type: "mcp_call", name: "kapruka_track_order" }],
       });
     }
 
