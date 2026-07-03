@@ -5,6 +5,7 @@ import type {
   AgentStep,
   AgentStepStatus,
   AgentToolCall,
+  OrderTrackingResult,
   ProductRankingSignal,
 } from "@/types/agent";
 import { generateText } from "ai";
@@ -3861,11 +3862,44 @@ function fallbackOrderTrackingReply(tracking: TrackOrderResult) {
       }.`
     : "";
   const commentText = tracking.comments ? ` ${tracking.comments}` : "";
-
   return `Order ${orderNumber} is ${status}${city}.${latestText}${deliveryDate}${amountText}${commentText}${liveText}${mediaText}`.replace(
     /\s+/g,
     " "
   );
+}
+
+function publicOrderTrackingResult(
+  tracking: TrackOrderResult
+): OrderTrackingResult {
+  const rawAmount = tracking.amount;
+  const amount =
+    typeof rawAmount === "string"
+      ? { value: rawAmount, currency: "LKR" }
+      : rawAmount?.value
+        ? { value: rawAmount.value, currency: rawAmount.currency || "LKR" }
+        : null;
+
+  return {
+    orderNumber: tracking.order_number || "",
+    status: tracking.status || "",
+    statusDisplay:
+      tracking.status_display || tracking.status || "Status available",
+    orderDate: tracking.order_date || null,
+    deliveryDate: tracking.delivery_date || null,
+    shippedDate: tracking.shipped_date || null,
+    amount,
+    comments: tracking.comments || null,
+    recipientCity: tracking.recipient?.city || null,
+    progress: (tracking.progress || [])
+      .filter((item) => item.step || item.timestamp)
+      .map((item) => ({
+        step: item.step || "Status update",
+        timestamp: item.timestamp || "",
+      })),
+    liveTrackingAvailable: tracking.live_tracking_available === true,
+    hasDeliveryVideo: tracking.has_delivery_video === true,
+    hasDeliveryPhoto: tracking.has_delivery_photo === true,
+  };
 }
 
 function isPlainGreeting(message: string) {
@@ -4040,6 +4074,7 @@ export async function POST(req: Request) {
         reply: displayReply,
         products: [],
         agentState,
+        tracking: publicOrderTrackingResult(tracking),
         debug: [{ type: "mcp_call", name: "kapruka_track_order" }],
       });
     }

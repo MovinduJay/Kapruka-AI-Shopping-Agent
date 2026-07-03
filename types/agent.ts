@@ -73,10 +73,33 @@ export type AgentState = {
   observations: string[];
 };
 
+export type OrderTrackingResult = {
+  orderNumber: string;
+  status: string;
+  statusDisplay: string;
+  orderDate?: string | null;
+  deliveryDate?: string | null;
+  shippedDate?: string | null;
+  amount?: {
+    value: string;
+    currency: string;
+  } | null;
+  comments?: string | null;
+  recipientCity?: string | null;
+  progress: Array<{
+    step: string;
+    timestamp: string;
+  }>;
+  liveTrackingAvailable: boolean;
+  hasDeliveryVideo: boolean;
+  hasDeliveryPhoto: boolean;
+};
+
 export type AgentChatResponse = {
   reply?: string;
   error?: string;
   products?: ProductCard[];
   agentState?: AgentState;
+  tracking?: OrderTrackingResult;
   debug?: unknown;
 };

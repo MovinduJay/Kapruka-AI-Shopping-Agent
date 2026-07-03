@@ -4,6 +4,7 @@ import { Fragment, useState } from "react";
 import {
   CalendarDays,
   CheckCircle2,
+  Copy,
   CreditCard,
   ExternalLink,
   Gift,
@@ -14,6 +15,8 @@ import {
   MessageSquareText,
   PackageCheck,
   Phone,
+  RadioTower,
+  Route,
   ShieldCheck,
   ShoppingCart,
   Truck,
@@ -21,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import type { DeliveryResult } from "@/components/delivery/DeliveryPanel";
+import type { AgentChatResponse, OrderTrackingResult } from "@/types/agent";
 import type { CartItem } from "@/types/product";
 
 export type CheckoutForm = {
@@ -109,6 +113,8 @@ const checkoutSteps = [
   target: CheckoutProgressTarget;
 }>;
 
+const TRACKING_ORDER_NUMBER = "VPAY827982BA";
+
 function getProductImageUrl(product: CartItem) {
   if (!product.imageUrl && !product.productUrl) return null;
 
@@ -129,6 +135,24 @@ function formatDate(date: string) {
 
 function formatMoney(amount: number, currency = "LKR") {
   return `${currency === "LKR" ? "Rs. " : `${currency} `}${amount.toLocaleString()}`;
+}
+
+function formatTrackingAmount(amount: OrderTrackingResult["amount"]) {
+  if (!amount?.value) return null;
+
+  const numericValue = Number(amount.value);
+
+  if (Number.isFinite(numericValue)) {
+    return formatMoney(numericValue, amount.currency);
+  }
+
+  return `${amount.currency} ${amount.value}`;
+}
+
+function latestProgressItem(tracking: OrderTrackingResult) {
+  return tracking.progress.length > 0
+    ? tracking.progress[tracking.progress.length - 1]
+    : null;
 }
 
 function CheckoutReviewItem({ item }: { item: CartItem }) {
@@ -209,6 +233,11 @@ export function CheckoutPanel({
 }: Props) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackingError, setTrackingError] = useState("");
+  const [tracking, setTracking] = useState<OrderTrackingResult | null>(null);
+  const [trackingExpanded, setTrackingExpanded] = useState(false);
+  const [copiedTrackingNumber, setCopiedTrackingNumber] = useState(false);
   const { form, step, result } = checkoutState;
   const cartTotal = cart.reduce(
     (total, item) => total + (item.price || 0) * item.quantity,
@@ -306,6 +335,53 @@ export function CheckoutPanel({
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function copyTrackingNumber() {
+    try {
+      await navigator.clipboard.writeText(TRACKING_ORDER_NUMBER);
+      setCopiedTrackingNumber(true);
+      window.setTimeout(() => setCopiedTrackingNumber(false), 1400);
+    } catch {
+      setCopiedTrackingNumber(false);
+    }
+  }
+
+  async function showTrackingProgress() {
+    if (trackingLoading) return;
+
+    setTrackingLoading(true);
+    setTrackingError("");
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: `Track order ${TRACKING_ORDER_NUMBER}`,
+          history: [],
+          memory: {},
+        }),
+      });
+      const data = (await response.json()) as AgentChatResponse;
+
+      if (!response.ok || data.error || !data.tracking) {
+        throw new Error(data.error || "Could not load order progress.");
+      }
+
+      setTracking(data.tracking);
+      setTrackingExpanded(true);
+    } catch (requestError) {
+      setTrackingError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not load order progress."
+      );
+    } finally {
+      setTrackingLoading(false);
     }
   }
 
@@ -782,21 +858,150 @@ export function CheckoutPanel({
 
           {step === "pay" && result && (
             <div className="space-y-5">
-              <div className="checkout-confirm-card rounded-3xl border p-5">
-                <div className="flex items-start gap-3">
-                  <div className="checkout-confirm-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl">
-                    <CheckCircle2 size={22} />
+              <div className="checkout-section-card overflow-hidden rounded-3xl border">
+                <div className="border-b border-white/10 p-5">
+                  <div className="flex items-start gap-3">
+                    <div className="checkout-section-icon flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl">
+                      <PackageCheck size={21} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold uppercase tracking-wide text-purple-300">
+                        Order tracking
+                      </p>
+                      <h3 className="mt-1 break-all text-xl font-black text-white">
+                        {TRACKING_ORDER_NUMBER}
+                      </h3>
+                      <p className="mt-2 text-sm font-black text-slate-950">
+                        Demo (not real)
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-white">
-                      Receipt preview
-                    </h3>
-                    <p className="mt-1 text-sm leading-6 text-slate-400">
-                      Checkout link created. Payment is still required to place
-                      the order.
-                    </p>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={copyTrackingNumber}
+                      className="flex min-h-11 items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-slate-200 transition hover:border-purple-400/50 hover:bg-white/[0.08]"
+                    >
+                      <Copy size={17} />
+                      {copiedTrackingNumber ? "Copied" : "Copy number"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (tracking) {
+                          setTrackingExpanded((expanded) => !expanded);
+                          return;
+                        }
+
+                        void showTrackingProgress();
+                      }}
+                      disabled={trackingLoading}
+                      className="flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-purple-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {trackingLoading ? (
+                        <LoaderCircle size={17} className="animate-spin" />
+                      ) : (
+                        <Route size={17} />
+                      )}
+                      {tracking
+                        ? trackingExpanded
+                          ? "Hide progress"
+                          : "Show progress"
+                        : "Show progress"}
+                    </button>
                   </div>
                 </div>
+
+                {trackingError && (
+                  <div className="border-b border-rose-400/20 bg-rose-500/10 p-4 text-sm leading-6 text-rose-200">
+                    {trackingError}
+                  </div>
+                )}
+
+                {tracking && trackingExpanded && (
+                  <div className="p-5">
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+                        <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+                          <RadioTower size={14} />
+                          Status
+                        </p>
+                        <p className="mt-1 text-sm font-black text-emerald-300">
+                          {tracking.statusDisplay}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+                        <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+                          <Truck size={14} />
+                          Destination
+                        </p>
+                        <p className="mt-1 truncate text-sm font-bold text-white">
+                          {tracking.recipientCity || "On file"}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-3">
+                        <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
+                          <CreditCard size={14} />
+                          Amount
+                        </p>
+                        <p className="mt-1 text-sm font-bold text-white">
+                          {formatTrackingAmount(tracking.amount) || "On file"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {latestProgressItem(tracking) && (
+                      <div className="mt-4 rounded-2xl border border-emerald-400/25 bg-emerald-500/10 p-4">
+                        <p className="text-xs font-bold uppercase tracking-wide text-emerald-300">
+                          Latest update
+                        </p>
+                        <p className="mt-1 text-sm font-bold text-white">
+                          {latestProgressItem(tracking)?.step}
+                        </p>
+                        <p className="mt-1 text-xs text-emerald-100/80">
+                          {latestProgressItem(tracking)?.timestamp}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="mt-5 space-y-0">
+                      {tracking.progress.map((item, index) => {
+                        const isLast = index === tracking.progress.length - 1;
+
+                        return (
+                          <div
+                            key={`${item.step}-${item.timestamp}-${index}`}
+                            className="grid grid-cols-[24px_1fr] gap-3"
+                          >
+                            <div className="flex flex-col items-center">
+                              <span
+                                className={`mt-1 flex h-6 w-6 items-center justify-center ${
+                                  isLast
+                                    ? "text-emerald-400"
+                                    : "text-slate-400"
+                                }`}
+                              >
+                                <CheckCircle2 size={14} strokeWidth={3} />
+                              </span>
+                              {!isLast && (
+                                <span className="h-full min-h-10 w-px bg-white/10" />
+                              )}
+                            </div>
+                            <div className="pb-4">
+                              <p className="text-sm font-semibold leading-5 text-white">
+                                {item.step}
+                              </p>
+                              <p className="mt-1 text-xs text-slate-400">
+                                {item.timestamp}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="checkout-section-card overflow-hidden rounded-3xl border">
