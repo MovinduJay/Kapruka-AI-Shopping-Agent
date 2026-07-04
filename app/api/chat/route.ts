@@ -1033,31 +1033,82 @@ function buildSearchQueries(
   const queries = [cleaned];
 
   const asksForGift =
-    /\b(?:gift|birthday|anniversary|mother|mom|mum|amma|father|dad|wife|husband|girlfriend|boyfriend)\b/i.test(
+    /\b(?:gift|gifts|thagi|present|birthday|anniversary|wedding|housewarming|new baby|baby shower|get well|sympathy|mother|mom|mum|amma|father|dad|thaththa|appachchi|wife|husband|girlfriend|boyfriend|aiya|malli|nangi|akka)\b/i.test(
       combinedContext
     );
 
   if (asksForGift) {
-    const recipient = /\b(?:mother|mom|mum|amma)\b/i.test(combinedContext)
-      ? "mother"
-      : /\b(?:father|dad)\b/i.test(combinedContext)
-        ? "father"
-        : null;
-    const occasion = /\bbirthday\b/i.test(combinedContext)
-      ? "birthday"
-      : /\banniversary\b/i.test(combinedContext)
-        ? "anniversary"
-        : null;
+    let recipient: string | null = null;
+    let occasion: string | null = null;
+
+    if (/\b(?:mother|mom|mum|amma)\b/i.test(combinedContext)) {
+      recipient = "mother";
+    } else if (/\b(?:father|dad|thaththa|appachchi)\b/i.test(combinedContext)) {
+      recipient = "father";
+    } else if (/\b(?:baby|newborn|new baby|baby shower)\b/i.test(combinedContext)) {
+      recipient = "new baby";
+    } else if (/\b(?:aiya|malli|brother)\b/i.test(combinedContext)) {
+      recipient = "brother";
+    } else if (/\b(?:akka|nangi|sister)\b/i.test(combinedContext)) {
+      recipient = "sister";
+    }
+
+    if (/\bbirthday\b/i.test(combinedContext)) {
+      occasion = "birthday";
+    } else if (/\banniversary\b/i.test(combinedContext)) {
+      occasion = "anniversary";
+    } else if (/\b(?:housewarming|new home|homecoming)\b/i.test(combinedContext)) {
+      occasion = "housewarming";
+    } else if (/\b(?:new baby|baby shower|newborn)\b/i.test(combinedContext)) {
+      occasion = "new baby";
+    } else if (/\b(?:get well|recovery|sick)\b/i.test(combinedContext)) {
+      occasion = "get well";
+    } else if (/\b(?:sympathy|condolence|funeral)\b/i.test(combinedContext)) {
+      occasion = "sympathy";
+    }
     const recipientText = recipient ? ` for ${recipient}` : "";
     const occasionText = occasion ? `${occasion} ` : "";
+    const wantsBundle =
+      /\b(?:bundle|list|registry|set|combo|hamper|with|and|cake|flowers?|chocolates?|card)\b/i.test(
+        combinedContext
+      );
 
-    queries.splice(
-      0,
-      queries.length,
-      `${occasionText}gifts${recipientText}`,
-      `${occasionText}flowers`,
-      `gift hamper${recipientText}`
-    );
+    if (occasion === "housewarming") {
+      queries.splice(
+        0,
+        queries.length,
+        "housewarming kitchen gift",
+        "home essentials gift",
+        "towel set home gift",
+        "home decor gift"
+      );
+    } else if (occasion === "new baby" || recipient === "new baby") {
+      queries.splice(
+        0,
+        queries.length,
+        "newborn baby gift set",
+        "baby hamper",
+        "baby clothes gift",
+        "baby toys"
+      );
+    } else if (wantsBundle) {
+      queries.splice(
+        0,
+        queries.length,
+        `${occasionText}cake`,
+        `${occasionText}flowers${recipientText}`,
+        `chocolate hamper${recipientText}`,
+        "greeting card"
+      );
+    } else {
+      queries.splice(
+        0,
+        queries.length,
+        `${occasionText}gifts${recipientText}`,
+        `${occasionText}flowers`,
+        `gift hamper${recipientText}`
+      );
+    }
   }
 
   const hasSpecificSearchContext = searchTokens(searchContext).length > 0;
@@ -2432,6 +2483,17 @@ function clearlyAsksForProductSearch(
     /\b(?:find|show\s*me|show|search|browse|shop|buy|purchase|look for|looking for|get me|give me|options? for|choices? for|shortlist)\b/i.test(
       normalized
     );
+  const tanglishCommerceRequest =
+    /\b(?:hoyala|balanna|denna|one|ona|awashyai|ganna|thiyenawada|tiyenawada|yata|adui|aduma)\b/i.test(
+      normalized
+    ) && hasSearchableProductPhrase(normalized);
+  const giftRequest =
+    /\b(?:gift|gifts|thagi|present|birthday|anniversary|housewarming|new baby|baby shower|get well|amma|thaththa|appachchi|aiya|malli|akka|nangi)\b/i.test(
+      normalized
+    ) &&
+    /\b(?:find|show|suggest|recommend|build|create|hoyala|denna|one|ona|yata|under|rs\.?|lkr|\d+\s*k)\b/i.test(
+      normalized
+    );
   const recommendationRequest =
     /\b(?:recommend|suggest|best|top|options?|choices?)\b/i.test(normalized);
   const productAvailabilityQuestion =
@@ -2480,6 +2542,8 @@ function clearlyAsksForProductSearch(
 
   return (
     explicitCommerceRequest ||
+    tanglishCommerceRequest ||
+    giftRequest ||
     recommendationRequest ||
     productAvailabilityQuestion ||
     concreteNeed ||
@@ -3287,6 +3351,10 @@ Core customer model:
 - The primary user is shopping for their own everyday needs.
 - Do not assume a purchase is a gift, has a recipient, or has an occasion.
 - Treat gifting as one important shopping mode only when the user mentions a recipient, celebration, event, or gift intent.
+- For gift intent, think in bundles when useful: main gift, small add-on, card/message, and delivery timing. Do not force all four if the user asked for one item.
+- For registry-style requests, build a shortlist the user can save to their gift list. Mention budget balance and practical variety instead of pretending a Kapruka registry exists.
+- For occasion shortcuts such as birthday, anniversary, new baby, housewarming, get well, or same-day delivery, search directly and return a balanced mix of product types when the user asks to browse or build a bundle.
+- For recipient-first gifting, use recipient, occasion, city, date, budget, and gift message when provided. Ask only one missing detail if it would materially change the choice.
 - Help users discover products, compare practical tradeoffs, stay within budget, and choose between marketplace options.
 - When seller, brand, size, compatibility, quantity, specifications, or delivery details affect the decision, surface those factors or ask one focused question.
 
@@ -3388,12 +3456,15 @@ Shopping rules:
 
 Search quality rules:
 - For Tanglish/Sinhala requests, convert the user's intent into strong English search keywords before calling tools.
+- Understand common Sri Lankan relationship and gift phrasing: amma/mom/mother, thaththa/appachchi/father, aiya/malli/brother, akka/nangi/sister, thagi/gift, hoyala/find, denna/give, yata/under.
 - Preserve product-defining terms such as model numbers, brands, sizes, capacities, colors, pack quantities, and compatibility requirements.
 - Use broad marketplace category terms for vague everyday requests, then narrow based on the returned products and user preferences.
 - Only apply recipient and occasion search expansion when the request is explicitly about gifting.
 - If the recipient is mother, amma, mom, or අම්මා, prefer search keywords like "mother birthday flowers cake chocolate hamper gift".
 - If the recipient is father, appachchi, dad, or තාත්තා, prefer search keywords like "father birthday hamper chocolate cake gift".
 - If the user asks for brother, aiya, malli, or සහෝදරයා, prefer search keywords like "brother birthday mug hamper chocolate cake gift".
+- If the user asks for new baby, baby shower, or newborn gifts, prefer baby gift sets, baby clothes, baby hampers, and soft toys.
+- If the user asks for housewarming or new home gifts, prefer home essentials, kitchen items, towel sets, decor, and practical bundles.
 - If the user asks for girlfriend, wife, anniversary, or love, prefer flowers, chocolates, cakes, romantic gifts, and greeting cards.
 - Avoid irrelevant kids, superhero, boyfriend, girlfriend, or "for him" items unless the user asks for them.
 - De-duplicate products before replying.

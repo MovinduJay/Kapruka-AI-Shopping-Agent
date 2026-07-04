@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -9,12 +10,15 @@ import {
 } from "react";
 import {
   CakeSlice,
+  Baby,
   ChevronLeft,
   ChevronRight,
   Flower2,
+  Gift,
+  Heart,
   House,
   Laptop,
-  PackageCheck,
+  PackagePlus,
   Shirt,
   ShoppingBasket,
   Send,
@@ -42,6 +46,30 @@ const suggestions = [
     icon: Laptop,
   },
   {
+    key: "birthday-gift",
+    label: "Birthday gift",
+    prompt: "Build a birthday gift bundle under Rs. 10,000",
+    icon: Gift,
+  },
+  {
+    key: "anniversary-gift",
+    label: "Anniversary",
+    prompt: "Show me anniversary flowers, chocolates, cakes, and cards",
+    icon: Heart,
+  },
+  {
+    key: "new-baby-gift",
+    label: "New baby",
+    prompt: "Find a newborn baby gift bundle for a hospital visit",
+    icon: Baby,
+  },
+  {
+    key: "housewarming-gift",
+    label: "Housewarming",
+    prompt: "Build a practical housewarming gift list for a new home",
+    icon: House,
+  },
+  {
     key: "groceries",
     label: "Groceries",
     prompt: "Find pantry and household essentials for this week",
@@ -60,10 +88,10 @@ const suggestions = [
     icon: House,
   },
   {
-    key: "tracking",
-    label: "Order tracking",
-    prompt: "Track order VPAY827982BA",
-    icon: PackageCheck,
+    key: "gift-bundle",
+    label: "Gift bundle",
+    prompt: "Create a gift bundle with a cake, flowers, chocolates, and a card",
+    icon: PackagePlus,
   },
 ];
 
@@ -128,19 +156,33 @@ export function WelcomeScreen({
     }
   }
 
-  function scrollCategories(direction: "left" | "right") {
+  const scrollCategories = useCallback((direction: "left" | "right") => {
     const carousel = carouselRef.current;
+    const firstCard = carousel?.firstElementChild;
 
-    if (!carousel) return;
+    if (!carousel || !(firstCard instanceof HTMLElement)) return;
+
+    const gap = Number.parseFloat(getComputedStyle(carousel).columnGap) || 0;
+    const cardStep = firstCard.getBoundingClientRect().width + gap;
+    const maxScrollLeft = carousel.scrollWidth - carousel.clientWidth;
+    const isAtStart = carousel.scrollLeft <= cardStep / 2;
+    const isAtEnd = carousel.scrollLeft >= maxScrollLeft - cardStep / 2;
+
+    if (direction === "right" && isAtEnd) {
+      carousel.scrollTo({ left: 0, behavior: "smooth" });
+      return;
+    }
+
+    if (direction === "left" && isAtStart) {
+      carousel.scrollTo({ left: maxScrollLeft, behavior: "smooth" });
+      return;
+    }
 
     carousel.scrollBy({
-      left:
-        direction === "left"
-          ? -carousel.clientWidth
-          : carousel.clientWidth,
+      left: direction === "left" ? -cardStep : cardStep,
       behavior: "smooth",
     });
-  }
+  }, []);
 
   return (
     <div className="flex flex-1 items-center overflow-y-auto px-4 pb-7 pt-5 font-sans sm:px-6 sm:pb-10 sm:pt-6">
@@ -153,10 +195,10 @@ export function WelcomeScreen({
           />
         </div>
 
-        <h2 className="mt-0 text-[2.15rem] font-semibold leading-tight text-white sm:text-[3.35rem]">
+        <h2 className="mt-0 text-[2.3rem] font-semibold leading-tight text-white sm:text-[3.55rem]">
           Shop across Kapruka.
         </h2>
-        <p className="mx-auto mt-2 max-w-2xl text-lg text-slate-300 sm:text-[1.7rem] sm:leading-tight">
+        <p className="mx-auto mt-2 max-w-2xl text-xl text-slate-300 sm:text-[1.82rem] sm:leading-tight">
           Hi, what do you need today?
         </p>
 

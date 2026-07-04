@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   ExternalLink,
+  Heart,
   ImageIcon,
   ShoppingCart,
   Star,
@@ -12,7 +13,9 @@ import type { ProductCard as ProductCardType } from "@/types/product";
 type Props = {
   product: ProductCardType;
   isInCart: boolean;
+  isInGiftList?: boolean;
   onAddToCart: (product: ProductCardType) => void;
+  onAddToGiftList?: (product: ProductCardType) => void;
   onViewDetails: (product: ProductCardType) => void;
 };
 
@@ -25,7 +28,9 @@ function formatPrice(price: number) {
 export function ProductCard({
   product,
   isInCart,
+  isInGiftList = false,
   onAddToCart,
+  onAddToGiftList,
   onViewDetails,
 }: Props) {
   const [imageFailed, setImageFailed] = useState(false);
@@ -168,6 +173,7 @@ export function ProductCard({
               </p>
             )}
           </div>
+
         </div>
 
         <div className="mt-auto flex gap-2 pt-3">
@@ -182,7 +188,7 @@ export function ProductCard({
                   ? `${product.name} is out of stock`
                   : `Add ${product.name} to cart`
             }
-            className="flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl bg-purple-500 px-3 text-sm font-semibold text-white transition hover:bg-purple-400 disabled:bg-white/[0.07] disabled:text-slate-500"
+            className="flex h-11 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-purple-500 px-3 text-sm font-semibold text-white transition hover:bg-purple-400 disabled:bg-white/[0.07] disabled:text-slate-500"
           >
             <ShoppingCart size={16} />
             {isInCart
@@ -191,6 +197,29 @@ export function ProductCard({
                 ? "Unavailable"
                 : "Add to cart"}
           </button>
+
+          {onAddToGiftList && (
+            <button
+              type="button"
+              onClick={() => onAddToGiftList(product)}
+              aria-label={
+                isInGiftList
+                  ? `Remove ${product.name} from gift list`
+                  : `Save ${product.name} to gift list`
+              }
+              title={isInGiftList ? "Remove from gift list" : "Save to gift list"}
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition ${
+                isInGiftList
+                  ? "border-rose-300/45 bg-rose-500/15 text-rose-200"
+                  : "border-white/10 bg-white/[0.03] text-slate-300 hover:border-rose-300/45 hover:bg-rose-500/15 hover:text-rose-200"
+              }`}
+            >
+              <Heart
+                size={17}
+                fill={isInGiftList ? "currentColor" : "none"}
+              />
+            </button>
+          )}
 
           {product.productUrl && (
             <a

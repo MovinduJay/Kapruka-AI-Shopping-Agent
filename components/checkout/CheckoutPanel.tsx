@@ -430,13 +430,13 @@ export function CheckoutPanel({
 
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <div
-            className="checkout-panel-card mb-6 rounded-3xl border px-5 py-5"
+            className="checkout-panel-card mb-5 rounded-2xl border px-4 py-3.5"
             aria-label="Checkout progress"
           >
             <div className="relative grid grid-cols-4 items-center">
-              <div className="absolute left-[12.5%] right-[12.5%] top-1/2 h-0.5 -translate-y-1/2 bg-slate-700" />
+              <div className="absolute left-[12.5%] right-[12.5%] top-1/2 h-px -translate-y-1/2 bg-slate-700" />
               <div
-                className="absolute left-[12.5%] right-[12.5%] top-1/2 h-0.5 -translate-y-1/2 bg-purple-400 transition-all"
+                className="absolute left-[12.5%] right-[12.5%] top-1/2 h-px -translate-y-1/2 bg-purple-400 transition-all"
               />
 
               {checkoutSteps.map(({ label, icon: Icon, target }, index) => {
@@ -450,18 +450,18 @@ export function CheckoutPanel({
                     <button
                       type="button"
                       onClick={() => onProgressStepClick(target)}
-                      className={`flex h-12 w-12 items-center justify-center rounded-full border-2 shadow-lg transition hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-purple-400/25 ${
+                      className={`flex h-9 w-9 items-center justify-center rounded-full border shadow-md transition hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-purple-400/25 ${
                         isComplete
-                          ? "border-purple-200 bg-purple-500 text-white shadow-purple-950/30"
+                          ? "border-purple-200 bg-purple-500 text-white shadow-purple-950/25"
                           : isCurrent
-                            ? "border-purple-300 bg-slate-950 text-purple-200 shadow-purple-950/30 ring-4 ring-purple-500/20"
-                          : "border-slate-600 bg-slate-900 text-slate-300 shadow-slate-950/30"
+                            ? "border-purple-300 bg-slate-950 text-purple-200 shadow-purple-950/25 ring-2 ring-purple-500/20"
+                          : "border-slate-600 bg-slate-900 text-slate-300 shadow-slate-950/25"
                       }`}
                       title={label}
                       aria-label={`Go to ${label}`}
                       aria-current={isCurrent ? "step" : undefined}
                     >
-                      <Icon size={21} strokeWidth={2.5} />
+                      <Icon size={17} strokeWidth={2.5} />
                     </button>
                   </div>
                 );

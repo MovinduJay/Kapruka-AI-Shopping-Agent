@@ -8,7 +8,9 @@ import type { ProductCard as ProductCardType } from "@/types/product";
 type Props = {
   products: ProductCardType[];
   cartProductIds: string[];
+  giftListProductIds?: string[];
   onAddToCart: (product: ProductCardType) => void;
+  onAddToGiftList?: (product: ProductCardType) => void;
   onViewDetails: (product: ProductCardType) => void;
   onFollowUp: (message: string, requestMessage?: string) => void;
   searchContext: string;
@@ -42,7 +44,9 @@ function searchSubjectFromContext(context: string) {
 export function ProductCarousel({
   products,
   cartProductIds,
+  giftListProductIds = [],
   onAddToCart,
+  onAddToGiftList,
   onViewDetails,
   onFollowUp,
   searchContext,
@@ -129,12 +133,14 @@ export function ProductCarousel({
         {products.map((product) => (
           <div
             key={`${product.id}:${product.imageUrl || product.productUrl || "no-image"}`}
-            className="w-[82%] shrink-0 snap-start sm:w-[calc((100%_-_0.5rem)/2)] lg:w-[calc((100%_-_1rem)/3)] xl:w-[calc((100%_-_1.5rem)/4)]"
+            className="w-[88%] shrink-0 snap-start sm:w-[calc((100%_-_0.5rem)/2)] lg:w-[calc((100%_-_0.5rem)/2)] xl:w-[calc((100%_-_1rem)/3)]"
           >
             <ProductCard
               product={product}
               isInCart={cartProductIds.includes(product.id)}
+              isInGiftList={giftListProductIds.includes(product.id)}
               onAddToCart={onAddToCart}
+              onAddToGiftList={onAddToGiftList}
               onViewDetails={onViewDetails}
             />
           </div>
@@ -145,7 +151,7 @@ export function ProductCarousel({
             type="button"
             onClick={() => onFollowUp(moreDisplayMessage, moreRequestMessage)}
             disabled={disabled}
-            className="flex min-h-[360px] w-[82%] shrink-0 snap-start flex-col items-center justify-center rounded-[30px] border border-dashed border-purple-400/45 bg-purple-500/[0.07] p-6 text-center text-purple-200 transition hover:border-purple-300 hover:bg-purple-500/15 disabled:cursor-not-allowed disabled:opacity-45 sm:w-[calc((100%_-_0.5rem)/2)] lg:w-[calc((100%_-_1rem)/3)] xl:w-[calc((100%_-_1.5rem)/4)]"
+            className="flex min-h-[360px] w-[88%] shrink-0 snap-start flex-col items-center justify-center rounded-[30px] border border-dashed border-purple-400/45 bg-purple-500/[0.07] p-6 text-center text-purple-200 transition hover:border-purple-300 hover:bg-purple-500/15 disabled:cursor-not-allowed disabled:opacity-45 sm:w-[calc((100%_-_0.5rem)/2)] lg:w-[calc((100%_-_0.5rem)/2)] xl:w-[calc((100%_-_1rem)/3)]"
           >
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-purple-500 text-white shadow-lg shadow-purple-950/25">
               <Plus size={24} strokeWidth={2.5} />

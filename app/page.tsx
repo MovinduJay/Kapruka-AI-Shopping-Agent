@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Check,
+  ClipboardList,
   Clock,
   Copy,
+  Gift,
   History,
   ImageIcon,
   Menu,
@@ -267,6 +269,7 @@ function SavedChatCard({ chat, active, onOpen }: SavedChatCardProps) {
 const agentMemoryKey = "kapruka-agent-memory";
 const agentRunsKey = "kapruka-agent-runs";
 const savedChatsKey = "kapruka-saved-shopping-chats";
+const giftListKey = "kapruka-gift-list";
 
 function createChatId() {
   return `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -362,6 +365,54 @@ function loadSavedChats(): SavedShoppingChat[] {
 
 function saveShoppingChats(chats: SavedShoppingChat[]) {
   window.localStorage.setItem(savedChatsKey, JSON.stringify(chats.slice(0, 20)));
+}
+
+function loadGiftList(): CartItem[] {
+  try {
+    const raw = window.localStorage.getItem(giftListKey);
+    const parsed = raw ? (JSON.parse(raw) as CartItem[]) : [];
+
+    return Array.isArray(parsed)
+      ? parsed
+          .filter(
+            (item) =>
+              item &&
+              typeof item.id === "string" &&
+              typeof item.name === "string"
+          )
+          .map((item) => ({
+            ...item,
+            quantity:
+              typeof item.quantity === "number" && item.quantity > 0
+                ? Math.min(Math.round(item.quantity), 99)
+                : 1,
+          }))
+          .slice(0, 30)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveGiftList(items: CartItem[]) {
+  window.localStorage.setItem(giftListKey, JSON.stringify(items.slice(0, 30)));
+}
+
+function formatGiftListText(items: CartItem[]) {
+  const total = items.reduce(
+    (sum, item) => sum + (item.price || 0) * item.quantity,
+    0
+  );
+  const lines = items.map((item, index) => {
+    const price =
+      item.price === null ? "Price unavailable" : `Rs. ${item.price.toLocaleString("en-LK")}`;
+
+    return `${index + 1}. ${item.name} x${item.quantity} - ${price}${
+      item.productUrl ? ` - ${item.productUrl}` : ""
+    }`;
+  });
+
+  return `Kapruka gift list\n${lines.join("\n")}\nTotal: Rs. ${total.toLocaleString("en-LK")}`;
 }
 
 function mergeSavedChats(
@@ -541,6 +592,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [chatStarted, setChatStarted] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [giftList, setGiftList] = useState<CartItem[]>([]);
   const [activeChatId, setActiveChatId] = useState(() => createChatId());
   const [savedChats, setSavedChats] = useState<SavedShoppingChat[]>([]);
   const [savedChatsLoaded, setSavedChatsLoaded] = useState(false);
@@ -549,6 +601,7 @@ export default function Home() {
   const [selectedProduct, setSelectedProduct] =
     useState<ProductCardType | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
+  const [giftListOpen, setGiftListOpen] = useState(false);
   const [deliveryPanelOpen, setDeliveryPanelOpen] = useState(false);
   const [checkoutPanelOpen, setCheckoutPanelOpen] = useState(false);
   const [checkedDelivery, setCheckedDelivery] =
@@ -563,6 +616,7 @@ export default function Home() {
   const [locationPromptDismissed, setLocationPromptDismissed] = useState(false);
   const [composerGlass, setComposerGlass] = useState(false);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
+  const [giftListCopied, setGiftListCopied] = useState(false);
   const theme = useSyncExternalStore(
     subscribeToTheme,
     getThemeSnapshot,
@@ -576,6 +630,7 @@ export default function Home() {
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       setSavedChats(loadSavedChats());
+      setGiftList(loadGiftList());
       setSavedChatsLoaded(true);
     }, 0);
 
@@ -655,6 +710,90 @@ export default function Home() {
 
       return next;
     });
+  }
+
+  function addToGiftList(product: ProductCardType) {
+    setGiftList((prev) => {
+      const existing = prev.find((item) => item.id === product.id);
+      const next = existing
+        ? prev.filter((item) => item.id !== product.id)
+        : [...prev, { ...product, quantity: 1 }];
+
+      saveGiftList(next);
+      postObservabilityEvent("/api/observability/product-interaction", {
+        product,
+        action: existing ? "remove_from_gift_list" : "save_to_gift_list",
+      });
+
+      return next;
+    });
+  }
+
+  function removeFromGiftList(productId: string) {
+    setGiftList((prev) => {
+      const next = prev.filter((item) => item.id !== productId);
+
+      saveGiftList(next);
+      return next;
+    });
+  }
+
+  function changeGiftListQuantity(productId: string, change: number) {
+    setGiftList((prev) => {
+      const next = prev
+        .map((item) =>
+          item.id === productId
+            ? {
+                ...item,
+                quantity: Math.min(Math.max(item.quantity + change, 0), 99),
+              }
+            : item
+        )
+        .filter((item) => item.quantity > 0);
+
+      saveGiftList(next);
+      return next;
+    });
+  }
+
+  function moveGiftListToCart() {
+    setCart((prev) => {
+      const next = [...prev];
+
+      for (const giftItem of giftList) {
+        const existing = next.find((item) => item.id === giftItem.id);
+
+        if (existing) {
+          existing.quantity = Math.min(
+            existing.quantity + giftItem.quantity,
+            99
+          );
+        } else {
+          next.push(giftItem);
+        }
+      }
+
+      postObservabilityEvent("/api/observability/cart", { cart: next });
+      persistActiveChatSnapshot(
+        messages,
+        next,
+        checkedDelivery,
+        checkoutState,
+        "cart"
+      );
+
+      return next;
+    });
+    setShoppingFlowStep("cart");
+    setGiftListOpen(false);
+    setCartOpen(true);
+  }
+
+  async function copyGiftList() {
+    await navigator.clipboard.writeText(formatGiftListText(giftList));
+    setGiftListCopied(true);
+
+    window.setTimeout(() => setGiftListCopied(false), 1400);
   }
 
   function changeCartQuantity(productId: string, change: number) {
@@ -767,6 +906,7 @@ export default function Home() {
     setSavedChatsOpen(false);
     setSavedChatsClosing(false);
     setCartOpen(false);
+    setGiftListOpen(false);
     setDeliveryPanelOpen(false);
     setCheckoutPanelOpen(false);
     setSelectedProduct(null);
@@ -787,6 +927,7 @@ export default function Home() {
     setDeliveryPanelOpen(false);
     setCheckoutPanelOpen(false);
     setSelectedProduct(null);
+    setGiftListOpen(false);
     setCartOpen(true);
   }
 
@@ -803,6 +944,7 @@ export default function Home() {
     setSavedChatsOpen(false);
     setSavedChatsClosing(false);
     setCartOpen(false);
+    setGiftListOpen(false);
     setDeliveryPanelOpen(false);
     setCheckoutPanelOpen(false);
     setSelectedProduct(null);
@@ -844,6 +986,7 @@ export default function Home() {
   function openCurrentShoppingStep() {
     if (shoppingFlowStep === "checkout") {
       setCartOpen(false);
+      setGiftListOpen(false);
       setDeliveryPanelOpen(false);
       setCheckoutPanelOpen(true);
       return;
@@ -851,6 +994,7 @@ export default function Home() {
 
     if (shoppingFlowStep === "delivery" || shoppingFlowStep === "date") {
       setCartOpen(false);
+      setGiftListOpen(false);
       setCheckoutPanelOpen(false);
       setDeliveryPanelOpen(true);
       return;
@@ -858,6 +1002,7 @@ export default function Home() {
 
     setDeliveryPanelOpen(false);
     setCheckoutPanelOpen(false);
+    setGiftListOpen(false);
     setCartOpen(true);
   }
 
@@ -872,6 +1017,7 @@ export default function Home() {
     );
 
     setCartOpen(target === "cart");
+    setGiftListOpen(false);
     setDeliveryPanelOpen(target === "delivery" || target === "date");
     setCheckoutPanelOpen(target === "checkout");
   }
@@ -1100,6 +1246,10 @@ export default function Home() {
     0
   );
   const cartQuantity = cart.reduce((total, item) => total + item.quantity, 0);
+  const giftListQuantity = giftList.reduce(
+    (total, item) => total + item.quantity,
+    0
+  );
   const savedCartChats = savedChats
     .filter((chat) => chat.cart.length > 0 && chat.id !== activeChatId)
     .slice(0, 3);
@@ -1288,6 +1438,28 @@ export default function Home() {
                   </span>
                 )}
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCartOpen(false);
+                  setDeliveryPanelOpen(false);
+                  setCheckoutPanelOpen(false);
+                  setGiftListOpen(true);
+                }}
+                aria-label={`Open gift list with ${giftListQuantity} items`}
+                className="group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-slate-300 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-rose-300/60 hover:bg-rose-500/15 hover:text-rose-200 active:translate-y-0 active:scale-95"
+              >
+                <Gift
+                  size={20}
+                  className="transition-transform duration-200 group-hover:scale-110"
+                />
+                {giftListQuantity > 0 && (
+                  <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-rose-500 px-1.5 text-xs font-bold text-white">
+                    {giftListQuantity}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
         </header>
@@ -1418,7 +1590,9 @@ export default function Home() {
                       <ProductCarousel
                         products={groupProducts}
                         cartProductIds={cart.map((item) => item.id)}
+                        giftListProductIds={giftList.map((item) => item.id)}
                         onAddToCart={addToCart}
+                        onAddToGiftList={addToGiftList}
                         onViewDetails={viewProductDetails}
                         onFollowUp={sendMessage}
                         searchContext={productSearchContextBefore(index)}
@@ -1699,6 +1873,102 @@ export default function Home() {
                   >
                     Continue to delivery
                   </button>
+                </div>
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
+
+      {giftListOpen && (
+        <div className="cart-backdrop fixed inset-0 z-40 flex justify-end bg-slate-950/75 backdrop-blur-sm">
+          <button
+            type="button"
+            aria-label="Close gift list"
+            onClick={() => setGiftListOpen(false)}
+            className="absolute inset-0 cursor-default"
+          />
+
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gift-list-title"
+            className="cart-drawer relative flex h-full w-full max-w-md flex-col border-l border-white/10 bg-slate-950 shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-white/10 p-6">
+              <div className="flex min-w-0 items-center gap-3">
+                <ClipboardList size={22} />
+                <div className="min-w-0">
+                  <h2 id="gift-list-title" className="text-lg font-semibold">
+                    Gift List
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Plan a bundle before checkout.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setGiftListOpen(false)}
+                aria-label="Close gift list"
+                className="panel-close-button rounded-xl p-2 transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-3 overflow-y-auto p-6">
+              {giftList.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-5 text-sm leading-6 text-slate-400">
+                  Save products with the heart button to build a registry-style
+                  gift list. It stays separate from checkout until you move it
+                  to the cart.
+                </div>
+              ) : (
+                giftList.map((item) => (
+                  <CartItemRow
+                    key={item.id}
+                    item={item}
+                    onChangeQuantity={changeGiftListQuantity}
+                    onRemove={removeFromGiftList}
+                  />
+                ))
+              )}
+            </div>
+
+            {giftList.length > 0 && (
+              <div className="border-t border-white/10 p-6">
+                <div className="rounded-2xl border border-rose-400/25 bg-rose-500/10 p-4">
+                  <p className="text-sm text-slate-300">Gift list total</p>
+                  <p className="mt-1 text-2xl font-bold text-rose-200">
+                    Rs.{" "}
+                    {giftList
+                      .reduce(
+                        (sum, item) => sum + (item.price || 0) * item.quantity,
+                        0
+                      )
+                      .toLocaleString()}
+                  </p>
+
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={copyGiftList}
+                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm font-semibold text-white transition hover:border-rose-300/50 hover:bg-white/10"
+                    >
+                      {giftListCopied ? <Check size={16} /> : <Copy size={16} />}
+                      {giftListCopied ? "Copied" : "Copy list"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={moveGiftListToCart}
+                      className="rounded-xl bg-rose-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-rose-400"
+                    >
+                      Move to cart
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

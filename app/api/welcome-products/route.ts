@@ -45,12 +45,57 @@ const WELCOME_SEARCHES = [
   { key: "cakes", query: "cake" },
   { key: "flowers", query: "flowers" },
   { key: "electronics", query: "wireless earbuds" },
+  { key: "birthday-gift", query: "birthday gift hamper" },
+  { key: "anniversary-gift", query: "anniversary flowers" },
+  { key: "new-baby-gift", query: "newborn baby gift set" },
+  { key: "housewarming-gift", query: "housewarming kitchen gift" },
   { key: "groceries", query: "grocery essentials" },
   { key: "fashion", query: "women dress" },
   { key: "home", query: "kitchen" },
+  { key: "gift-bundle", query: "cake flowers chocolate gift" },
 ] as const;
 
 const FALLBACK_PRODUCTS: WelcomeProduct[] = [
+  {
+    key: "birthday-gift",
+    name: "Cheer Delight Grocery Hamper",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/https://partnercentral.kapruka.com/kapruka-pc/assets/images/product/pc00006/hamp0v18p00017/hamp0v18p00017_1.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/cheer-delight-grocery-hamper/kid/ef_pc_hamp0v18pod00017p",
+  },
+  {
+    key: "anniversary-gift",
+    name: "Candle Flower Bouquet 35 Piece Arrangement",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/https://partnercentral.kapruka.com/kapruka-pc/assets/images/product/pc01519/home0v4477p00022/home0v4477p00022_1.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/candle-flower-bouquet-35-piece/kid/ef_pc_home0v4477p00022",
+  },
+  {
+    key: "new-baby-gift",
+    name: "'Pamper Me' New Born Baby Essential Gift Set",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/shops/babyItems/productImages/babypack00766.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/pamper-me-new-born-baby-essent/kid/babypack00766",
+  },
+  {
+    key: "housewarming-gift",
+    name: "Airtight Ceramic Kitchen Canister",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/shops/specialGifts/productImages/1640586413215_img_0119_m.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/airtight-ceramic-kitchen-canis/kid/household00498",
+  },
+  {
+    key: "gift-bundle",
+    name: "Candle Flower Bouquet 35 Piece Arrangement",
+    imageUrl:
+      "https://static2.kapruka.com/product-image/width=330,quality=93,f=auto/https://partnercentral.kapruka.com/kapruka-pc/assets/images/product/pc01519/home0v4477p00022/home0v4477p00022_1.jpg",
+    productUrl:
+      "https://www.kapruka.com/buyonline/candle-flower-bouquet-35-piece/kid/ef_pc_home0v4477p00022",
+  },
   {
     key: "cakes",
     name: "Triple Delight Gateau Cake",
@@ -105,6 +150,24 @@ let welcomeProductsCache: {
   expiresAt: number;
   products: WelcomeProduct[];
 } | null = null;
+
+function hasAllWelcomeProducts(products: WelcomeProduct[]) {
+  const productKeys = new Set(products.map((product) => product.key));
+
+  return WELCOME_SEARCHES.every((search) => productKeys.has(search.key));
+}
+
+function normalizedImageUrl(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function hasUniqueWelcomeImages(products: WelcomeProduct[]) {
+  const imageUrls = products.map((product) =>
+    normalizedImageUrl(product.imageUrl)
+  );
+
+  return new Set(imageUrls).size === imageUrls.length;
+}
 
 function parseMcpResponse<T>(text: string): JsonRpcResponse<T> {
   const dataLines = text
@@ -182,7 +245,8 @@ async function searchRepresentativeProduct(
   headers: Record<string, string>,
   id: number,
   key: string,
-  query: string
+  query: string,
+  usedImageUrls: Set<string>
 ) {
   const response = await fetch(MCP_URL, {
     method: "POST",
@@ -221,10 +285,13 @@ async function searchRepresentativeProduct(
     (item) =>
       typeof item.name === "string" &&
       typeof item.image_url === "string" &&
-      item.image_url.length > 0
+      item.image_url.length > 0 &&
+      !usedImageUrls.has(normalizedImageUrl(item.image_url))
   );
 
   if (!product?.name || !product.image_url) return null;
+
+  usedImageUrls.add(normalizedImageUrl(product.image_url));
 
   return {
     key,
@@ -238,7 +305,9 @@ export async function GET() {
   try {
     if (
       welcomeProductsCache &&
-      welcomeProductsCache.expiresAt > Date.now()
+      welcomeProductsCache.expiresAt > Date.now() &&
+      hasAllWelcomeProducts(welcomeProductsCache.products) &&
+      hasUniqueWelcomeImages(welcomeProductsCache.products)
     ) {
       return Response.json(
         { products: welcomeProductsCache.products },
@@ -253,6 +322,7 @@ export async function GET() {
 
     const headers = await startMcpSession();
     const products: WelcomeProduct[] = [];
+    const usedImageUrls = new Set<string>();
 
     for (let index = 0; index < WELCOME_SEARCHES.length; index++) {
       const search = WELCOME_SEARCHES[index];
@@ -260,20 +330,29 @@ export async function GET() {
         headers,
         index + 2,
         search.key,
-        search.query
+        search.query,
+        usedImageUrls
       );
 
       if (product) products.push(product);
     }
 
-    const responseProducts =
-      products.length === WELCOME_SEARCHES.length
-        ? products
-        : FALLBACK_PRODUCTS.map(
-            (fallback) =>
-              products.find((product) => product.key === fallback.key) ||
-              fallback
-          );
+    const responseProducts = WELCOME_SEARCHES.flatMap((search) => {
+      const product = products.find((item) => item.key === search.key);
+
+      if (product) return [product];
+
+      const fallback = FALLBACK_PRODUCTS.find((item) => item.key === search.key);
+
+      if (!fallback) return [];
+
+      const imageUrl = normalizedImageUrl(fallback.imageUrl);
+
+      if (usedImageUrls.has(imageUrl)) return [];
+
+      usedImageUrls.add(imageUrl);
+      return [fallback];
+    });
 
     if (responseProducts.length > 0) {
       welcomeProductsCache = {
