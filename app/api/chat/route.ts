@@ -2500,10 +2500,18 @@ function clearlyAsksForProductSearch(
 function inferAgentIntent(message: string, history: ChatHistoryMessage[]) {
   const normalized = message.toLowerCase();
   const asksForProductSearch = clearlyAsksForProductSearch(message, history);
+  const orderNumber = extractPlausibleOrderNumber(message);
+  const pastedOrderNumberOnly =
+    Boolean(orderNumber) &&
+    message
+      .toUpperCase()
+      .split(/[^A-Z0-9]+/)
+      .filter(Boolean).length === 1;
 
   if (
     isOrderTrackingRequest(message) ||
-    (hasPlausibleOrderNumber(message) && recentlyAskedForOrderNumber(history))
+    pastedOrderNumberOnly ||
+    (Boolean(orderNumber) && recentlyAskedForOrderNumber(history))
   ) {
     return "order_tracking" as const;
   }
