@@ -46,6 +46,18 @@ const suggestions = [
     icon: Laptop,
   },
   {
+    key: "fashion",
+    label: "Fashion",
+    prompt: "Show me casual clothing and accessories under Rs. 10,000",
+    icon: Shirt,
+  },
+  {
+    key: "home",
+    label: "Home & living",
+    prompt: "Show me useful home and kitchen products",
+    icon: House,
+  },
+  {
     key: "birthday-gift",
     label: "Birthday gift",
     prompt: "Build a birthday gift bundle under Rs. 10,000",
@@ -74,18 +86,6 @@ const suggestions = [
     label: "Groceries",
     prompt: "Find pantry and household essentials for this week",
     icon: ShoppingBasket,
-  },
-  {
-    key: "fashion",
-    label: "Fashion",
-    prompt: "Show me casual clothing and accessories under Rs. 10,000",
-    icon: Shirt,
-  },
-  {
-    key: "home",
-    label: "Home & living",
-    prompt: "Show me useful home and kitchen products",
-    icon: House,
   },
   {
     key: "gift-bundle",
@@ -185,7 +185,7 @@ export function WelcomeScreen({
   }, []);
 
   return (
-    <div className="flex flex-1 items-center overflow-y-auto px-4 pb-7 pt-5 font-sans sm:px-6 sm:pb-10 sm:pt-6">
+    <div className="flex flex-1 items-center overflow-y-auto px-4 pb-7 pt-5 font-sans [scrollbar-width:none] sm:px-6 sm:pb-10 sm:pt-6 [&::-webkit-scrollbar]:hidden">
       <div className="mx-auto w-full max-w-6xl text-center">
         <div className="mx-auto flex h-40 w-40 items-center justify-center overflow-visible drop-shadow-[0_22px_38px_rgba(64,41,112,0.22)] sm:h-[202px] sm:w-[202px]">
           <BrandLogo

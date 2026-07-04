@@ -1409,7 +1409,7 @@ export default function Home() {
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="absolute right-3 top-5 z-10 flex items-center gap-2 sm:right-4">
               <button
                 type="button"
                 onClick={() => saveTheme(theme === "light" ? "dark" : "light")}
@@ -1425,13 +1425,13 @@ export default function Home() {
                 type="button"
                 onClick={openCurrentShoppingStep}
                 aria-label={`Open cart with ${cartQuantity} items`}
-                className="group relative flex shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-white/[0.06] px-3.5 py-3 text-sm font-semibold text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-purple-400/60 hover:bg-purple-500/15 hover:shadow-[0_12px_30px_-14px_rgba(64,41,112,0.55)] active:translate-y-0 active:scale-95"
+                title="Cart"
+                className="group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.06] text-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-purple-400/60 hover:bg-purple-500/15 hover:shadow-[0_12px_30px_-14px_rgba(64,41,112,0.55)] active:translate-y-0 active:scale-95"
               >
                 <ShoppingCart
                   size={21}
                   className="transition-transform duration-200 group-hover:scale-110"
                 />
-                <span className="hidden sm:inline">Cart</span>
                 {cartQuantity > 0 && (
                   <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-purple-500 px-1.5 text-xs font-bold text-white">
                     {cartQuantity}

@@ -45,13 +45,13 @@ const WELCOME_SEARCHES = [
   { key: "cakes", query: "cake" },
   { key: "flowers", query: "flowers" },
   { key: "electronics", query: "wireless earbuds" },
+  { key: "fashion", query: "women dress" },
+  { key: "home", query: "kitchen" },
   { key: "birthday-gift", query: "birthday gift hamper" },
   { key: "anniversary-gift", query: "anniversary flowers" },
   { key: "new-baby-gift", query: "newborn baby gift set" },
   { key: "housewarming-gift", query: "housewarming kitchen gift" },
   { key: "groceries", query: "grocery essentials" },
-  { key: "fashion", query: "women dress" },
-  { key: "home", query: "kitchen" },
   { key: "gift-bundle", query: "cake flowers chocolate gift" },
 ] as const;
 
